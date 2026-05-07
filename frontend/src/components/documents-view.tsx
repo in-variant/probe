@@ -37,6 +37,7 @@ import {
   UploadCloud,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn, formatBytes, formatDate, formatRelativeDate, getFileIcon, getFileIconTone } from "@/lib/utils";
 import {
   listDocuments,
@@ -232,9 +233,10 @@ export function DetailDrawer({
     setSaving(true);
     try {
       await updateFile(workspaceId, file.path, { status });
+      toast.success("File status updated");
       onRefresh();
-    } catch (err) {
-      console.error(err);
+    } catch {
+      toast.error("Failed to update file status");
     } finally {
       setSaving(false);
     }
@@ -244,18 +246,19 @@ export function DetailDrawer({
     try {
       const { url } = await getDownloadUrl(workspaceId, file.path);
       window.open(url, "_blank");
-    } catch (err) {
-      console.error(err);
+    } catch {
+      toast.error("Failed to get download link");
     }
   }
 
   async function handleDelete() {
     try {
       await deleteFile(workspaceId, file.path);
+      toast.success("File deleted");
       onRefresh();
       onClose();
-    } catch (err) {
-      console.error(err);
+    } catch {
+      toast.error("Failed to delete file");
     }
   }
 
@@ -717,8 +720,8 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
       const data = await listDocuments(workspaceId, currentPath);
       setFolders(data.folders);
       setFiles(data.files);
-    } catch (err) {
-      console.error("Failed to fetch documents:", err);
+    } catch {
+      toast.error("Failed to load documents");
     } finally {
       setLoading(false);
       setSyncing(false);
@@ -746,13 +749,24 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
   }
 
   async function handleCreateFolder(name: string) {
-    await createFolder(workspaceId, name, currentPath);
-    fetchDocuments();
+    try {
+      await createFolder(workspaceId, name, currentPath);
+      toast.success("Folder created");
+      fetchDocuments();
+    } catch {
+      toast.error("Failed to create folder");
+      throw new Error("create-folder-failed");
+    }
   }
 
   async function handleDeleteFolder(path: string) {
-    await deleteFolder(workspaceId, path);
-    fetchDocuments();
+    try {
+      await deleteFolder(workspaceId, path);
+      toast.success("Folder deleted");
+      fetchDocuments();
+    } catch {
+      toast.error("Failed to delete folder");
+    }
   }
 
   function openUploadModal(initialFiles?: FileList | File[]) {
@@ -768,10 +782,11 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
     const paths = Array.from(selectedFiles);
     try {
       await bulkDeleteFiles(workspaceId, paths);
+      toast.success(`${paths.length} file${paths.length !== 1 ? "s" : ""} deleted`);
       setSelectedFiles(new Set());
       fetchDocuments();
-    } catch (err) {
-      console.error(err);
+    } catch {
+      toast.error("Failed to delete selected files");
     }
   }
 

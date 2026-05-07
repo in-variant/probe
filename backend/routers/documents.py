@@ -2,7 +2,7 @@ import json
 import mimetypes
 from datetime import timedelta
 from pathlib import PurePosixPath
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, Request
 from pydantic import BaseModel, Field
 
 import local_cache
@@ -220,15 +220,20 @@ async def delete_folder(
 
 # ── Upload file(s) ────────────────────────────────────────────────
 
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB per part
+
 
 @router.post("/workspaces/{workspace_id}/files", status_code=201)
-async def upload_files(
-    workspace_id: str,
-    files: list[UploadFile] = File(...),
-    path: str = Form(default="/"),
-    status: str = Form(default="uploaded"),
-):
+async def upload_files(workspace_id: str, request: Request):
     _ensure_workspace(workspace_id)
+
+    form = await request.form(max_part_size=MAX_UPLOAD_SIZE)
+    path = form.get("path", "/")
+    status = form.get("status", "uploaded")
+    files = form.getlist("files")
+
+    if not files:
+        raise HTTPException(status_code=422, detail="No files provided")
 
     uploaded = []
     for f in files:
@@ -254,6 +259,7 @@ async def upload_files(
             "status": status,
         })
 
+    await form.close()
     _update_workspace_counts(workspace_id)
     return {"uploaded": uploaded}
 

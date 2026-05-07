@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { toast } from "sonner";
 import { cn, formatBytes, getFileIcon, getFileIconTone } from "@/lib/utils";
 import {
   searchDocuments,
@@ -90,7 +91,7 @@ function ConversationView({
       const details = await getFileDetails(workspaceId, result.path);
       setDrawerFile(details);
     } catch {
-      console.error("Failed to fetch file details for", result.path);
+      toast.error("Failed to load file details");
     }
   }
 

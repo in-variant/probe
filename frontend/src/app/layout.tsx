@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Toaster } from "sonner";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 
@@ -30,6 +31,7 @@ export default function RootLayout({
     >
       <body className="h-full">
         <AppShell>{children}</AppShell>
+        <Toaster position="bottom-right" richColors closeButton />
       </body>
     </html>
   );

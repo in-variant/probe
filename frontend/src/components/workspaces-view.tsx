@@ -12,6 +12,7 @@ import {
   ChevronDown,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn, formatDate, formatRelativeDate } from "@/lib/utils";
 import {
   listWorkspaces,
@@ -78,7 +79,7 @@ function WorkspaceSettingsDrawer({
       if (err instanceof Error && err.message.includes("409")) {
         setError("A workspace with this name already exists");
       } else {
-        console.error("Failed to save workspace:", err);
+        toast.error("Failed to save workspace settings");
       }
     } finally {
       setSaving(false);
@@ -89,10 +90,11 @@ function WorkspaceSettingsDrawer({
     setDeleting(true);
     try {
       await deleteWorkspace(workspace.id);
+      toast.success("Workspace deleted");
       onDeleted();
       onClose();
-    } catch (err) {
-      console.error("Failed to delete workspace:", err);
+    } catch {
+      toast.error("Failed to delete workspace");
     } finally {
       setDeleting(false);
     }
@@ -435,8 +437,8 @@ export function WorkspacesView() {
     try {
       const data = await listWorkspaces();
       setWorkspaces(data);
-    } catch (err) {
-      console.error("Failed to fetch workspaces:", err);
+    } catch {
+      toast.error("Failed to load workspaces");
     } finally {
       setLoading(false);
     }
