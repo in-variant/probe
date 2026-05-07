@@ -167,4 +167,5 @@ jobs:
             --cpu 1 \
             --min-instances 0 \
             --max-instances 3 \
-            --port 8080
+            --port 8080 \
+            --set-env-vars "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},GOOGLE_OAUTH_CLIENT_ID=${{ secrets.GOOGLE_OAUTH_CLIENT_ID }},GOOGLE_OAUTH_CLIENT_SECRET=${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}"
