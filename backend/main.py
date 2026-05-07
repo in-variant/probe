@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import workspaces, documents
+from routers import workspaces, documents, search
 from sync import sync_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
@@ -35,6 +35,7 @@ app.add_middleware(
 
 app.include_router(workspaces.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
+app.include_router(search.router, prefix="/api")
 
 
 @app.get("/api/health")

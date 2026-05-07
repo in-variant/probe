@@ -1,15 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { FolderOpen, Home, Menu, Search, Settings, X } from "lucide-react";
+import { FolderOpen, Home, Menu, Settings, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { ProbeLogo } from "@/components/probe-logo";
 
 const NAV_ITEMS = [
   { href: "/", icon: Home, label: "Home" },
   { href: "/workspaces", icon: FolderOpen, label: "Workspaces" },
-  { href: "/search", icon: Search, label: "Search" },
 ] as const;
 
 const BOTTOM_NAV = [
@@ -51,7 +51,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pageTitle = (() => {
     if (pathname === "/") return "Home";
     if (pathname.startsWith("/workspaces")) return "Workspaces";
-    if (pathname.startsWith("/search")) return "Search";
     if (pathname.startsWith("/settings")) return "Settings";
     return "Dashboard";
   })();
@@ -61,12 +60,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex h-full w-full">
         {/* Desktop sidebar */}
         <aside className="hidden w-72 shrink-0 border-r border-zinc-200/70 bg-white/90 px-4 py-6 backdrop-blur-sm lg:block">
-          <div className="mb-10 px-3">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Invariant AI</p>
-            <h1 className="mt-2 text-xl font-semibold tracking-[-0.02em] text-zinc-900">
-              <Link href="/">Probe</Link>
-            </h1>
-          </div>
+          <Link href="/" className="mb-10 block px-3">
+            <ProbeLogo />
+          </Link>
           <nav className="space-y-1">
             {NAV_ITEMS.map((item) => (
               <NavLink key={item.href} {...item} />
@@ -110,10 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-8 flex items-center justify-between px-3">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Invariant AI</p>
-                <h1 className="mt-1 text-xl font-semibold tracking-[-0.02em] text-zinc-900">Probe</h1>
-              </div>
+              <ProbeLogo />
               <button
                 onClick={() => setMobileSidebarOpen(false)}
                 className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
@@ -137,7 +130,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Mobile bottom nav */}
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
-        <div className="grid grid-cols-4 gap-1">
+        <div className="grid grid-cols-3 gap-1">
           {[...NAV_ITEMS, ...BOTTOM_NAV].map((item) => {
             const Icon = item.icon;
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);

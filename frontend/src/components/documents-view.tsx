@@ -868,7 +868,7 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div
-      className="relative min-h-[calc(100dvh-7.5rem)] overflow-hidden rounded-2xl border border-zinc-200/80 bg-white"
+      className="relative h-full overflow-hidden rounded-2xl border border-zinc-200/80 bg-white"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

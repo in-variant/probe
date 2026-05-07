@@ -236,3 +236,32 @@ export async function getDownloadUrl(
   const params = new URLSearchParams({ path });
   return request(`/api/workspaces/${workspaceId}/files/download-url?${params}`);
 }
+
+// ── Search / Knowledge Base API ─────────────────────────────────
+
+export interface SearchResult {
+  path: string;
+  name: string;
+  relevance: string;
+  score: number;
+  size?: number;
+  content_type?: string;
+  status?: string;
+}
+
+export interface SearchResponse {
+  interaction_id: string;
+  results: SearchResult[];
+  message: string;
+}
+
+export async function searchDocuments(
+  workspaceId: string,
+  query: string
+): Promise<SearchResponse> {
+  return request<SearchResponse>("/api/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace_id: workspaceId, query }),
+  });
+}
