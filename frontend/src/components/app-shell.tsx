@@ -1,11 +1,22 @@
 "use client";
 
-import { Home, Search, Settings } from "lucide-react";
+import { useState } from "react";
+import { FolderOpen, Home, Menu, Search, Settings, X } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
 
-const NOISE_SVG = `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
+const NAV_ITEMS = [
+  { href: "/", icon: Home, label: "Home" },
+  { href: "/workspaces", icon: FolderOpen, label: "Workspaces" },
+  { href: "/search", icon: Search, label: "Search" },
+] as const;
 
-function NavItem({
+const BOTTOM_NAV = [
+  { href: "/settings", icon: Settings, label: "Settings" },
+] as const;
+
+function NavLink({
   href,
   icon: Icon,
   label,
@@ -14,10 +25,18 @@ function NavItem({
   icon: React.ComponentType<{ className?: string }>;
   label: string;
 }) {
+  const pathname = usePathname();
+  const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+
   return (
     <Link
       href={href}
-      className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100"
+      className={cn(
+        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
+        "hover:bg-zinc-100/80 hover:text-zinc-900",
+        active && "bg-zinc-900 text-white hover:bg-zinc-900 hover:text-white",
+        !active && "text-zinc-600",
+      )}
     >
       <Icon className="h-4 w-4" />
       <span>{label}</span>
@@ -26,44 +45,118 @@ function NavItem({
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  const pageTitle = (() => {
+    if (pathname === "/") return "Home";
+    if (pathname.startsWith("/workspaces")) return "Workspaces";
+    if (pathname.startsWith("/search")) return "Search";
+    if (pathname.startsWith("/settings")) return "Settings";
+    return "Dashboard";
+  })();
+
   return (
-    <div className="flex h-full">
-      {/* Sidebar */}
-      <aside className="relative w-72 shrink-0 border-r border-gray-200 bg-white/90 backdrop-blur-sm">
-        <div
-          className="pointer-events-none absolute inset-0 opacity-[0.02]"
-          style={{ backgroundImage: NOISE_SVG }}
-        />
-        <div className="relative flex h-full flex-col">
-          <div className="flex h-14 items-center border-b border-gray-200 px-6">
-            <span className="text-base font-semibold tracking-tight">
-              Probe
-            </span>
+    <div className="paper-grain h-dvh overflow-hidden bg-background">
+      <div className="flex h-full w-full">
+        {/* Desktop sidebar */}
+        <aside className="hidden w-72 shrink-0 border-r border-zinc-200/70 bg-white/90 px-4 py-6 backdrop-blur-sm lg:block">
+          <div className="mb-10 px-3">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Invariant AI</p>
+            <h1 className="mt-2 text-xl font-semibold tracking-[-0.02em] text-zinc-900">
+              <Link href="/">Probe</Link>
+            </h1>
           </div>
-          <nav className="flex-1 space-y-1 p-3">
-            <NavItem href="/" icon={Home} label="Home" />
-            <NavItem href="/search" icon={Search} label="Search" />
-            <NavItem href="/settings" icon={Settings} label="Settings" />
+          <nav className="space-y-1">
+            {NAV_ITEMS.map((item) => (
+              <NavLink key={item.href} {...item} />
+            ))}
           </nav>
-        </div>
-      </aside>
-
-      {/* Main area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Topbar */}
-        <header className="relative h-14 shrink-0 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
-          <div
-            className="pointer-events-none absolute inset-0 opacity-[0.02]"
-            style={{ backgroundImage: NOISE_SVG }}
-          />
-          <div className="relative flex h-full items-center px-6">
-            <h1 className="text-sm font-medium text-gray-600">Dashboard</h1>
+          <div className="mt-auto pt-6 border-t border-zinc-200/70 mt-8">
+            {BOTTOM_NAV.map((item) => (
+              <NavLink key={item.href} {...item} />
+            ))}
           </div>
-        </header>
+        </aside>
 
-        {/* Content */}
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <div className="flex h-full flex-1 flex-col overflow-hidden">
+          {/* Mobile-only topbar (hamburger) */}
+          <header className="sticky top-0 z-20 border-b border-zinc-200/70 bg-background/90 px-4 py-3 backdrop-blur lg:hidden">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setMobileSidebarOpen(true)}
+                className="rounded-xl border border-zinc-200/80 bg-white p-2 text-zinc-600"
+              >
+                <Menu className="h-4 w-4" />
+              </button>
+              <h2 className="text-sm font-medium text-zinc-600">{pageTitle}</h2>
+            </div>
+          </header>
+
+          <main className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 md:px-6 md:py-5 lg:px-8">
+            {children}
+          </main>
+        </div>
       </div>
+
+      {/* Mobile sidebar overlay */}
+      {mobileSidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/35 lg:hidden animate-fade-in"
+          onClick={() => setMobileSidebarOpen(false)}
+        >
+          <div
+            className="h-full w-72 bg-white px-4 py-6 shadow-xl animate-slide-in-left"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-8 flex items-center justify-between px-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Invariant AI</p>
+                <h1 className="mt-1 text-xl font-semibold tracking-[-0.02em] text-zinc-900">Probe</h1>
+              </div>
+              <button
+                onClick={() => setMobileSidebarOpen(false)}
+                className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <nav className="space-y-1">
+              {NAV_ITEMS.map((item) => (
+                <NavLink key={item.href} {...item} />
+              ))}
+            </nav>
+            <div className="mt-8 border-t border-zinc-200/70 pt-6">
+              {BOTTOM_NAV.map((item) => (
+                <NavLink key={item.href} {...item} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile bottom nav */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
+        <div className="grid grid-cols-4 gap-1">
+          {[...NAV_ITEMS, ...BOTTOM_NAV].map((item) => {
+            const Icon = item.icon;
+            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "flex flex-col items-center justify-center rounded-lg py-1 text-[10px] text-zinc-500",
+                  active && "bg-zinc-900 text-white",
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }
