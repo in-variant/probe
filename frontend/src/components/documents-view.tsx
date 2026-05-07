@@ -271,10 +271,10 @@ export function DetailDrawer({
           "pointer-events-auto opacity-100",
         )}
       />
-      <aside className="fixed right-0 top-0 z-50 h-dvh w-full max-w-[520px] animate-slide-in-right border-l border-zinc-200 bg-white shadow-xl">
+      <aside className="fixed inset-0 z-50 h-dvh w-full animate-slide-in-right bg-white shadow-xl sm:inset-auto sm:right-0 sm:top-0 sm:max-w-[520px] sm:border-l sm:border-zinc-200">
         <div className="flex h-full flex-col">
           {/* Header */}
-          <div className="border-b border-zinc-200 px-5 py-4">
+          <div className="border-b border-zinc-200 px-4 py-4 sm:px-5">
             <div className="flex items-center justify-between">
               <p className="text-xs uppercase tracking-[0.08em] text-zinc-500">File details</p>
               <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600">
@@ -293,7 +293,7 @@ export function DetailDrawer({
           </div>
 
           {/* Tabs */}
-          <div className="flex border-b border-zinc-200 px-5">
+          <div className="flex border-b border-zinc-200 px-4 sm:px-5">
             {TABS.map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
@@ -312,7 +312,7 @@ export function DetailDrawer({
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto px-5 py-4 text-sm">
+          <div className="flex-1 overflow-y-auto px-4 py-4 text-sm sm:px-5">
             {tab === "details" && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -382,7 +382,7 @@ export function DetailDrawer({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between border-t border-zinc-200 px-5 py-4">
+          <div className="flex items-center justify-between border-t border-zinc-200 px-4 py-4 sm:px-5">
             <div className="flex items-center gap-2">
               <button
                 onClick={handleDownload}
@@ -496,9 +496,9 @@ function UploadModal({
   const totalSize = stagedFiles.reduce((sum, f) => sum + f.size, 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white shadow-xl animate-slide-down">
-        <div className="flex items-center justify-between border-b border-zinc-100 px-6 py-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 backdrop-blur-sm animate-fade-in sm:items-center">
+      <div className="w-full max-w-lg rounded-t-2xl border border-zinc-200 bg-white shadow-xl animate-slide-down sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-4 sm:px-6">
           <h2 className="text-lg font-semibold tracking-[-0.02em] text-zinc-900">Upload Files</h2>
           <button
             onClick={handleCancel}
@@ -508,7 +508,7 @@ function UploadModal({
           </button>
         </div>
 
-        <div className="px-6 py-5">
+        <div className="px-4 py-5 sm:px-6">
           {uploadState === "selecting" && (
             <>
               <div
@@ -602,7 +602,7 @@ function UploadModal({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-zinc-100 px-6 py-4">
+        <div className="flex items-center justify-end gap-2 border-t border-zinc-100 px-4 py-4 sm:px-6">
           {uploadState === "selecting" && (
             <>
               <button onClick={handleCancel} className="rounded-full px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 transition-colors">Cancel</button>
@@ -662,8 +662,8 @@ function CreateFolderModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl animate-slide-down">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 backdrop-blur-sm animate-fade-in sm:items-center">
+      <div className="w-full max-w-md rounded-t-2xl border border-zinc-200 bg-white p-6 shadow-xl animate-slide-down sm:rounded-2xl">
         <h2 className="text-lg font-semibold tracking-[-0.02em] text-zinc-900">New Folder</h2>
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <div>
@@ -892,7 +892,7 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
       <div className="flex h-full flex-col">
         {/* Header: navigable breadcrumb */}
         <header className="border-b border-zinc-200/70 bg-white/70 px-4 pb-3 pt-5 md:px-6 md:pt-6">
-          <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-2xl font-medium text-zinc-900">
+          <nav aria-label="Breadcrumb" className="flex items-center gap-1 overflow-x-auto text-lg font-medium text-zinc-900 sm:text-2xl">
             <button
               type="button"
               onClick={() => navigateTo("/")}
@@ -932,8 +932,8 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
           </nav>
 
           {/* Filter / utility row */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="mt-4 space-y-3 md:space-y-0 md:flex md:flex-wrap md:items-center md:justify-between md:gap-3">
+            <div className="flex items-center gap-2 overflow-x-auto">
               <FilterSelect
                 label="Status"
                 value={statusFilter}
@@ -956,13 +956,13 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
-                <Search className="h-4 w-4 text-zinc-400" />
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 md:flex-initial">
+                <Search className="h-4 w-4 shrink-0 text-zinc-400" />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search in current folder"
-                  className="w-44 bg-transparent text-sm text-zinc-700 outline-none placeholder:text-zinc-400"
+                  placeholder="Search…"
+                  className="w-full min-w-0 bg-transparent text-sm text-zinc-700 outline-none placeholder:text-zinc-400 md:w-44"
                 />
               </div>
 
@@ -971,7 +971,7 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
               <button
                 type="button"
                 onClick={() => setShowCreateFolder(true)}
-                className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition cursor-pointer hover:bg-zinc-50 active:bg-zinc-100"
+                className="hidden items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition cursor-pointer hover:bg-zinc-50 active:bg-zinc-100 sm:inline-flex"
                 title="Create a new folder"
               >
                 <FolderPlus className="h-4 w-4" />
@@ -979,12 +979,20 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
               </button>
               <button
                 type="button"
+                onClick={() => setShowCreateFolder(true)}
+                className="inline-flex items-center justify-center rounded-full border border-zinc-200 bg-white p-1.5 text-zinc-700 transition cursor-pointer hover:bg-zinc-50 active:bg-zinc-100 sm:hidden"
+                title="Create a new folder"
+              >
+                <FolderPlus className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
                 onClick={() => openUploadModal()}
-                className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white shadow-sm transition cursor-pointer hover:bg-blue-700 active:bg-blue-800"
+                className="inline-flex shrink-0 items-center gap-2 rounded-full bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white shadow-sm transition cursor-pointer hover:bg-blue-700 active:bg-blue-800"
                 title="Upload files"
               >
                 <Upload className="h-4 w-4" />
-                Upload
+                <span className="hidden sm:inline">Upload</span>
               </button>
             </div>
           </div>
@@ -1063,7 +1071,7 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
                               e.stopPropagation();
                               setFolderMenuOpen(folderMenuOpen === folder.path ? null : folder.path);
                             }}
-                            className="invisible grid h-8 w-8 cursor-pointer place-items-center rounded-full text-zinc-500 transition hover:bg-zinc-100 group-hover:visible"
+                            className="grid h-8 w-8 cursor-pointer place-items-center rounded-full text-zinc-500 transition hover:bg-zinc-100 sm:invisible sm:group-hover:visible"
                           >
                             <MoreVertical className="h-4 w-4" />
                           </button>
@@ -1101,83 +1109,134 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
                   </div>
                   <div className="max-h-[52dvh] overflow-y-auto pr-1">
                     {viewMode === "list" ? (
-                      <div className="overflow-hidden rounded-xl border border-zinc-200">
-                        <table className="w-full min-w-[720px] text-sm">
-                          <thead className="bg-zinc-50 text-left text-[11px] uppercase tracking-[0.08em] text-zinc-500">
-                            <tr>
-                              <th className="w-10 px-4 py-2.5">
+                      <>
+                        {/* Desktop table */}
+                        <div className="hidden overflow-hidden rounded-xl border border-zinc-200 md:block">
+                          <table className="w-full text-sm">
+                            <thead className="bg-zinc-50 text-left text-[11px] uppercase tracking-[0.08em] text-zinc-500">
+                              <tr>
+                                <th className="w-10 px-4 py-2.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedFiles.size === filteredFiles.length && filteredFiles.length > 0}
+                                    onChange={toggleSelectAll}
+                                    className="h-4 w-4 rounded border-zinc-300 accent-blue-600"
+                                  />
+                                </th>
+                                <th className="px-4 py-2.5 font-medium">Name</th>
+                                <th className="px-4 py-2.5 font-medium">Status</th>
+                                <th className="px-4 py-2.5 font-medium">Updated</th>
+                                <th className="px-4 py-2.5 font-medium">Size</th>
+                                <th className="w-10 px-2 py-2.5" aria-label="Actions" />
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredFiles.map((file) => {
+                                const tone = getFileIconTone(file.extension);
+                                return (
+                                  <tr
+                                    key={file.path}
+                                    onClick={() => setDrawerFile(file)}
+                                    className={cn(
+                                      "group cursor-pointer border-t border-zinc-100 transition",
+                                      selectedFiles.has(file.path)
+                                        ? "bg-blue-50/60"
+                                        : "hover:bg-blue-50/40",
+                                    )}
+                                  >
+                                    <td className="px-4 py-2.5">
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedFiles.has(file.path)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={() => toggleFileSelection(file.path)}
+                                        className="h-4 w-4 rounded border-zinc-300 accent-blue-600"
+                                      />
+                                    </td>
+                                    <td className="px-4 py-2.5">
+                                      <span className="flex min-w-0 items-center gap-3">
+                                        <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg ring-1", tone)}>
+                                          <FileIconComponent extension={file.extension} className="h-4 w-4" />
+                                        </span>
+                                        <span className="min-w-0">
+                                          <span className="block truncate font-medium text-zinc-900">{file.name}</span>
+                                          <span className="block text-[11px] uppercase tracking-[0.06em] text-zinc-400">{file.extension}</span>
+                                        </span>
+                                      </span>
+                                    </td>
+                                    <td className="px-4 py-2.5">
+                                      <FileStatusBadge status={file.status} />
+                                    </td>
+                                    <td className="px-4 py-2.5 text-zinc-600">{formatRelativeDate(file.updated_at)}</td>
+                                    <td className="px-4 py-2.5 text-zinc-600">{formatBytes(file.size)}</td>
+                                    <td className="px-2 py-2.5 text-right">
+                                      <button
+                                        type="button"
+                                        aria-label={`More actions for ${file.name}`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setDrawerFile(file);
+                                        }}
+                                        className="invisible grid h-8 w-8 cursor-pointer place-items-center rounded-full text-zinc-500 transition hover:bg-zinc-100 group-hover:visible"
+                                      >
+                                        <MoreVertical className="h-4 w-4" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Mobile card list */}
+                        <div className="space-y-2 md:hidden">
+                          <div className="flex items-center gap-2 px-1 pb-1">
+                            <input
+                              type="checkbox"
+                              checked={selectedFiles.size === filteredFiles.length && filteredFiles.length > 0}
+                              onChange={toggleSelectAll}
+                              className="h-4 w-4 rounded border-zinc-300 accent-blue-600"
+                            />
+                            <span className="text-xs text-zinc-500">Select all</span>
+                          </div>
+                          {filteredFiles.map((file) => {
+                            const tone = getFileIconTone(file.extension);
+                            return (
+                              <div
+                                key={file.path}
+                                onClick={() => setDrawerFile(file)}
+                                className={cn(
+                                  "flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 transition",
+                                  selectedFiles.has(file.path)
+                                    ? "border-blue-200 bg-blue-50/60"
+                                    : "border-zinc-200 bg-white hover:border-blue-200 hover:bg-blue-50/40",
+                                )}
+                              >
                                 <input
                                   type="checkbox"
-                                  checked={selectedFiles.size === filteredFiles.length && filteredFiles.length > 0}
-                                  onChange={toggleSelectAll}
-                                  className="h-4 w-4 rounded border-zinc-300 accent-blue-600"
+                                  checked={selectedFiles.has(file.path)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={() => toggleFileSelection(file.path)}
+                                  className="h-4 w-4 shrink-0 rounded border-zinc-300 accent-blue-600"
                                 />
-                              </th>
-                              <th className="px-4 py-2.5 font-medium">Name</th>
-                              <th className="px-4 py-2.5 font-medium">Status</th>
-                              <th className="px-4 py-2.5 font-medium">Updated</th>
-                              <th className="px-4 py-2.5 font-medium">Size</th>
-                              <th className="w-10 px-2 py-2.5" aria-label="Actions" />
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredFiles.map((file) => {
-                              const tone = getFileIconTone(file.extension);
-                              return (
-                                <tr
-                                  key={file.path}
-                                  onClick={() => setDrawerFile(file)}
-                                  className={cn(
-                                    "group cursor-pointer border-t border-zinc-100 transition",
-                                    selectedFiles.has(file.path)
-                                      ? "bg-blue-50/60"
-                                      : "hover:bg-blue-50/40",
-                                  )}
-                                >
-                                  <td className="px-4 py-2.5">
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedFiles.has(file.path)}
-                                      onClick={(e) => e.stopPropagation()}
-                                      onChange={() => toggleFileSelection(file.path)}
-                                      className="h-4 w-4 rounded border-zinc-300 accent-blue-600"
-                                    />
-                                  </td>
-                                  <td className="px-4 py-2.5">
-                                    <span className="flex min-w-0 items-center gap-3">
-                                      <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg ring-1", tone)}>
-                                        <FileIconComponent extension={file.extension} className="h-4 w-4" />
-                                      </span>
-                                      <span className="min-w-0">
-                                        <span className="block truncate font-medium text-zinc-900">{file.name}</span>
-                                        <span className="block text-[11px] uppercase tracking-[0.06em] text-zinc-400">{file.extension}</span>
-                                      </span>
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-2.5">
-                                    <FileStatusBadge status={file.status} />
-                                  </td>
-                                  <td className="px-4 py-2.5 text-zinc-600">{formatRelativeDate(file.updated_at)}</td>
-                                  <td className="px-4 py-2.5 text-zinc-600">{formatBytes(file.size)}</td>
-                                  <td className="px-2 py-2.5 text-right">
-                                    <button
-                                      type="button"
-                                      aria-label={`More actions for ${file.name}`}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setDrawerFile(file);
-                                      }}
-                                      className="invisible grid h-8 w-8 cursor-pointer place-items-center rounded-full text-zinc-500 transition hover:bg-zinc-100 group-hover:visible"
-                                    >
-                                      <MoreVertical className="h-4 w-4" />
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+                                <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg ring-1", tone)}>
+                                  <FileIconComponent extension={file.extension} className="h-4 w-4" />
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium text-zinc-900">{file.name}</p>
+                                  <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500">
+                                    <span>{formatBytes(file.size)}</span>
+                                    <span className="text-zinc-300">·</span>
+                                    <span>{formatRelativeDate(file.updated_at)}</span>
+                                  </div>
+                                </div>
+                                <FileStatusBadge status={file.status} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
                     ) : (
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                         {filteredFiles.map((file) => {

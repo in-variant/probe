@@ -108,10 +108,10 @@ function WorkspaceSettingsDrawer({
         onClick={onClose}
         className="fixed inset-0 z-40 bg-zinc-900/25 transition-opacity pointer-events-auto opacity-100"
       />
-      <aside className="fixed right-0 top-0 z-50 h-dvh w-full max-w-[520px] animate-slide-in-right border-l border-zinc-200 bg-white shadow-xl">
+      <aside className="fixed inset-0 z-50 h-dvh w-full animate-slide-in-right bg-white shadow-xl sm:inset-auto sm:right-0 sm:top-0 sm:max-w-[520px] sm:border-l sm:border-zinc-200">
         <div className="flex h-full flex-col">
           {/* Header */}
-          <div className="border-b border-zinc-200 px-5 py-4">
+          <div className="border-b border-zinc-200 px-4 py-4 sm:px-5">
             <div className="flex items-center justify-between">
               <p className="text-xs uppercase tracking-[0.08em] text-zinc-500">Workspace settings</p>
               <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600">
@@ -130,7 +130,7 @@ function WorkspaceSettingsDrawer({
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto px-5 py-5 text-sm">
+          <div className="flex-1 overflow-y-auto px-4 py-5 text-sm sm:px-5">
             <div className="space-y-5">
               {/* Name */}
               <div>
@@ -236,7 +236,7 @@ function WorkspaceSettingsDrawer({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-end gap-2 border-t border-zinc-200 px-5 py-4">
+          <div className="flex items-center justify-end gap-2 border-t border-zinc-200 px-4 py-4 sm:px-5">
             <button
               onClick={onClose}
               className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 transition-colors"
@@ -297,7 +297,7 @@ function WorkspaceCard({
           }}
           className={cn(
             "rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600",
-            "opacity-0 group-hover:opacity-100 focus:opacity-100",
+            "sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100",
           )}
           title="Workspace settings"
         >
@@ -363,8 +363,8 @@ function CreateWorkspaceModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl animate-slide-down" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 backdrop-blur-sm animate-fade-in sm:items-center">
+      <div className="w-full max-w-md rounded-t-2xl border border-zinc-200 bg-white p-6 shadow-xl animate-slide-down sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold tracking-[-0.02em] text-zinc-900">New Workspace</h2>
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <div>
@@ -506,7 +506,7 @@ export function WorkspacesView() {
   }
 
   return (
-    <div className="min-h-[calc(100dvh-7.5rem)] overflow-hidden rounded-2xl border border-zinc-200/80 bg-white">
+    <div className="mb-14 min-h-[calc(100dvh-7.5rem)] overflow-hidden rounded-2xl border border-zinc-200/80 bg-white lg:mb-0">
       <div className="flex h-full flex-col">
         {/* Header */}
         <header className="border-b border-zinc-200/70 bg-white/70 px-4 pb-3 pt-5 md:px-6 md:pt-6">
@@ -519,27 +519,29 @@ export function WorkspacesView() {
             </div>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
-                <Search className="h-4 w-4 text-zinc-400" />
+                <Search className="h-4 w-4 shrink-0 text-zinc-400" />
                 <input
                   type="text"
-                  placeholder="Search workspaces…"
+                  placeholder="Search…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-44 bg-transparent text-sm text-zinc-700 outline-none placeholder:text-zinc-400"
+                  className="w-28 bg-transparent text-sm text-zinc-700 outline-none placeholder:text-zinc-400 sm:w-44"
                 />
               </div>
               <button
                 onClick={() => setShowCreate(true)}
                 className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white shadow-sm transition cursor-pointer hover:bg-blue-700 active:bg-blue-800"
               >
-                <Plus className="h-4 w-4" /> New Workspace
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">New Workspace</span>
+                <span className="sm:hidden">New</span>
               </button>
             </div>
           </div>
 
           {/* Filter + Sort row */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex overflow-hidden rounded-full border border-zinc-200 bg-white">
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="inline-flex overflow-x-auto overflow-hidden rounded-full border border-zinc-200 bg-white">
               {STATUS_FILTERS.map(({ key, label }) => (
                 <button
                   key={key}

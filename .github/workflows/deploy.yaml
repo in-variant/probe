@@ -119,8 +119,11 @@ jobs:
             --max-instances 3 \
             --port 8080
 
+  backend-tests:
+    uses: ./.github/workflows/backend-tests.yaml
+
   deploy-backend:
-    needs: [detect-changes, setup-registry]
+    needs: [detect-changes, setup-registry, backend-tests]
     if: needs.detect-changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     permissions:
