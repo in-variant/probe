@@ -1,43 +1,43 @@
 """
 GCS client setup — isolated to avoid circular imports.
 Both storage.py and sync.py import from here.
+
+Authentication order (handled by google.auth.default):
+  1. GOOGLE_APPLICATION_CREDENTIALS env var  → local dev (points to SA key file)
+  2. Cloud Run metadata server               → production (no key file needed)
+  3. gcloud auth application-default login   → developer machines
 """
 
-from pathlib import Path
+import google.auth
 from google.cloud import storage
-from google.oauth2 import service_account
 
 BUCKET_NAME = "probe-akashalabdhi"
 WORKSPACE_ROOT = "workspace"
 
-SA_KEY_PATH = Path(__file__).parent / "invariant-ai-dev-3eae095dc7b6.json"
+SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
-_credentials: service_account.Credentials | None = None
+_credentials: google.auth.credentials.Credentials | None = None
+_project_id: str | None = None
 _client: storage.Client | None = None
 
 
-SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
-
-
-def get_credentials() -> service_account.Credentials:
-    global _credentials
+def get_credentials() -> google.auth.credentials.Credentials:
+    global _credentials, _project_id
     if _credentials is None:
-        _credentials = service_account.Credentials.from_service_account_file(
-            str(SA_KEY_PATH),
-            scopes=SCOPES,
-        )
+        _credentials, _project_id = google.auth.default(scopes=SCOPES)
     return _credentials
 
 
 def get_project_id() -> str:
-    return get_credentials().project_id
+    get_credentials()
+    return _project_id or ""
 
 
 def get_client() -> storage.Client:
     global _client
     if _client is None:
         creds = get_credentials()
-        _client = storage.Client(credentials=creds, project=creds.project_id)
+        _client = storage.Client(credentials=creds, project=get_project_id())
     return _client
 
 
