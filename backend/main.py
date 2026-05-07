@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -30,9 +31,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Probe API", version="0.1.0", lifespan=lifespan)
 
+_default_origins = [
+    "http://localhost:3000",
+    "https://probe-frontend-520296708682.us-central1.run.app",
+]
+_extra = os.getenv("CORS_ORIGINS", "")
+cors_origins = _default_origins + [o.strip() for o in _extra.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

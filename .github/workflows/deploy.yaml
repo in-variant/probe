@@ -12,6 +12,7 @@ env:
   REPOSITORY: probe
   FRONTEND_SERVICE: probe-frontend
   BACKEND_SERVICE: probe-backend
+  BACKEND_URL: https://probe-backend-520296708682.us-central1.run.app
 
 jobs:
   detect-changes:
@@ -98,6 +99,7 @@ jobs:
       - name: Build and Push Docker image
         run: |
           docker build \
+            --build-arg NEXT_PUBLIC_API_URL=${{ env.BACKEND_URL }} \
             -t ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.FRONTEND_SERVICE }}:${{ github.sha }} \
             -t ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.FRONTEND_SERVICE }}:latest \
             -f frontend/Dockerfile frontend
@@ -156,7 +158,7 @@ jobs:
             --image ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.BACKEND_SERVICE }}:${{ github.sha }} \
             --platform managed \
             --region ${{ env.REGION }} \
-            --no-allow-unauthenticated \
+            --allow-unauthenticated \
             --service-account github-deploy@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
             --memory 512Mi \
             --cpu 1 \
