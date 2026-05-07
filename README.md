@@ -23,7 +23,7 @@ npm run dev        # http://localhost:3000
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn main:app --reload   # http://localhost:8000
+uvicorn main:app --reload --port 8080   # http://localhost:8080
 ```
 
 ### API
