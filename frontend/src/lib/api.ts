@@ -253,15 +253,17 @@ export interface SearchResponse {
   interaction_id: string;
   results: SearchResult[];
   message: string;
+  summary: string;
 }
 
 export async function searchDocuments(
   workspaceId: string,
-  query: string
+  query: string,
+  sessionId: string
 ): Promise<SearchResponse> {
   return request<SearchResponse>("/api/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ workspace_id: workspaceId, query }),
+    body: JSON.stringify({ workspace_id: workspaceId, query, session_id: sessionId }),
   });
 }

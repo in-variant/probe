@@ -10,18 +10,24 @@ import {
   Image,
   Loader2,
   Music,
+  Plus,
   Presentation,
   Search,
   SendHorizontal,
   Sheet,
   Sparkles,
+  X,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { cn, formatBytes, getFileIcon, getFileIconTone } from "@/lib/utils";
 import {
   searchDocuments,
+  getFileDetails,
+  type FileItem,
   type SearchResult,
   type SearchResponse,
 } from "@/lib/api";
+import { DetailDrawer } from "@/components/documents-view";
 
 const FILE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   FileText, Image, Film, Music, Archive, FileCode, Sheet, Presentation, File,
@@ -42,27 +48,51 @@ interface Interaction {
   query: string;
   results: SearchResult[];
   message: string;
+  summary: string;
   timestamp: Date;
 }
 
-export function KnowledgePanel({
+interface Tab {
+  id: string;
+  label: string;
+  interactions: Interaction[];
+}
+
+function generateTabId(): string {
+  return crypto.randomUUID();
+}
+
+function ConversationView({
+  tab,
   workspaceId,
+  onUpdate,
 }: {
+  tab: Tab;
   workspaceId: string;
+  onUpdate: (interactions: Interaction[]) => void;
 }) {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [interactions, setInteractions] = useState<Interaction[]>([]);
+  const [drawerFile, setDrawerFile] = useState<FileItem | null>(null);
   const resultsEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     resultsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [interactions, searching]);
+  }, [tab.interactions, searching]);
 
   useEffect(() => {
     inputRef.current?.focus();
-  }, []);
+  }, [tab.id]);
+
+  async function openFileDrawer(result: SearchResult) {
+    try {
+      const details = await getFileDetails(workspaceId, result.path);
+      setDrawerFile(details);
+    } catch {
+      console.error("Failed to fetch file details for", result.path);
+    }
+  }
 
   const handleSearch = useCallback(async () => {
     const q = query.trim();
@@ -72,32 +102,30 @@ export function KnowledgePanel({
     setQuery("");
 
     try {
-      const response: SearchResponse = await searchDocuments(workspaceId, q);
-      setInteractions((prev) => [
-        ...prev,
-        {
-          id: response.interaction_id,
-          query: q,
-          results: response.results,
-          message: response.message,
-          timestamp: new Date(),
-        },
-      ]);
+      const response: SearchResponse = await searchDocuments(workspaceId, q, tab.id);
+      const newInteraction: Interaction = {
+        id: response.interaction_id,
+        query: q,
+        results: response.results,
+        message: response.message,
+        summary: response.summary ?? "",
+        timestamp: new Date(),
+      };
+      onUpdate([...tab.interactions, newInteraction]);
     } catch {
-      setInteractions((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          query: q,
-          results: [],
-          message: "Search failed. Please try again.",
-          timestamp: new Date(),
-        },
-      ]);
+      const newInteraction: Interaction = {
+        id: crypto.randomUUID(),
+        query: q,
+        results: [],
+        message: "Search failed. Please try again.",
+        summary: "",
+        timestamp: new Date(),
+      };
+      onUpdate([...tab.interactions, newInteraction]);
     } finally {
       setSearching(false);
     }
-  }, [query, workspaceId, searching]);
+  }, [query, workspaceId, searching, tab.id, tab.interactions, onUpdate]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -107,21 +135,9 @@ export function KnowledgePanel({
   }
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex items-center gap-2.5 border-b border-zinc-200/70 px-4 py-3">
-        <span className="grid h-7 w-7 place-items-center rounded-lg bg-zinc-900 text-white shadow-sm">
-          <Sparkles className="h-3.5 w-3.5" />
-        </span>
-        <div>
-          <h3 className="text-sm font-semibold text-zinc-900">Ask AI</h3>
-          <p className="text-[11px] text-zinc-400">Search your documents</p>
-        </div>
-      </div>
-
-      {/* Conversation area */}
+    <>
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {interactions.length === 0 && !searching ? (
+        {tab.interactions.length === 0 && !searching ? (
           <div className="flex h-full flex-col items-center justify-center px-4">
             <div className="rounded-2xl bg-zinc-100 p-4">
               <Search className="h-8 w-8 text-zinc-400" />
@@ -133,21 +149,25 @@ export function KnowledgePanel({
           </div>
         ) : (
           <div className="space-y-4">
-            {interactions.map((interaction) => (
+            {tab.interactions.map((interaction) => (
               <div key={interaction.id} className="space-y-2">
-                {/* User query */}
                 <div className="flex justify-end">
                   <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-zinc-900 px-3.5 py-2 text-[13px] leading-relaxed text-white">
                     {interaction.query}
                   </div>
                 </div>
 
-                {/* AI response */}
                 <div className="flex items-start gap-2">
                   <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-zinc-900 text-white">
                     <Sparkles className="h-3 w-3" />
                   </span>
                   <div className="min-w-0 flex-1">
+                    {interaction.summary && (
+                      <div className="prose prose-sm prose-zinc mb-2 max-w-none text-[13px] leading-relaxed">
+                        <ReactMarkdown>{interaction.summary}</ReactMarkdown>
+                      </div>
+                    )}
+
                     <p className="text-[11px] font-medium text-zinc-500">
                       {interaction.message}
                     </p>
@@ -160,7 +180,8 @@ export function KnowledgePanel({
                           return (
                             <div
                               key={`${interaction.id}-${idx}`}
-                              className="group flex items-center gap-2.5 rounded-lg border border-zinc-100 bg-white px-2.5 py-2 transition hover:border-zinc-300 hover:shadow-sm"
+                              onClick={() => openFileDrawer(result)}
+                              className="group flex cursor-pointer items-center gap-2.5 rounded-lg border border-zinc-100 bg-white px-2.5 py-2 transition hover:border-zinc-300 hover:shadow-sm"
                             >
                               <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-md ring-1", tone)}>
                                 <FileIconComponent extension={ext} className="h-3.5 w-3.5" />
@@ -228,7 +249,6 @@ export function KnowledgePanel({
         )}
       </div>
 
-      {/* Input */}
       <div className="border-t border-zinc-200/70 px-3 py-3">
         <div
           className={cn(
@@ -269,6 +289,122 @@ export function KnowledgePanel({
           </button>
         </div>
       </div>
+
+      {drawerFile && (
+        <DetailDrawer
+          file={drawerFile}
+          workspaceId={workspaceId}
+          onClose={() => setDrawerFile(null)}
+          onRefresh={() => setDrawerFile(null)}
+        />
+      )}
+    </>
+  );
+}
+
+export function KnowledgePanel({
+  workspaceId,
+}: {
+  workspaceId: string;
+}) {
+  const [tabs, setTabs] = useState<Tab[]>(() => [{
+    id: generateTabId(),
+    label: "Chat 1",
+    interactions: [],
+  }]);
+  const [activeTabId, setActiveTabId] = useState(tabs[0].id);
+
+  function addTab() {
+    const newTab: Tab = {
+      id: generateTabId(),
+      label: `Chat ${tabs.length + 1}`,
+      interactions: [],
+    };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+  }
+
+  function closeTab(tabId: string) {
+    setTabs((prev) => {
+      const next = prev.filter((t) => t.id !== tabId);
+      if (next.length === 0) {
+        const fresh: Tab = { id: generateTabId(), label: "Chat 1", interactions: [] };
+        setActiveTabId(fresh.id);
+        return [fresh];
+      }
+      if (activeTabId === tabId) {
+        const closedIdx = prev.findIndex((t) => t.id === tabId);
+        const newActive = next[Math.min(closedIdx, next.length - 1)];
+        setActiveTabId(newActive.id);
+      }
+      return next;
+    });
+  }
+
+  function updateTabInteractions(tabId: string, interactions: Interaction[]) {
+    setTabs((prev) =>
+      prev.map((t) => (t.id === tabId ? { ...t, interactions } : t))
+    );
+  }
+
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Header with tabs */}
+      <div className="border-b border-zinc-200/70">
+        <div className="flex items-center gap-1 px-2 pt-2">
+          <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTabId(tab.id)}
+                className={cn(
+                  "group flex shrink-0 items-center gap-1.5 rounded-t-lg px-3 py-1.5 text-xs font-medium transition",
+                  tab.id === activeTabId
+                    ? "bg-white text-zinc-900 shadow-sm"
+                    : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700",
+                )}
+              >
+                <Sparkles className="h-3 w-3" />
+                <span className="max-w-[80px] truncate">{tab.label}</span>
+                {tabs.length > 1 && (
+                  <span
+                    role="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTab(tab.id);
+                    }}
+                    className={cn(
+                      "rounded p-0.5 transition",
+                      tab.id === activeTabId
+                        ? "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+                        : "text-zinc-300 opacity-0 group-hover:opacity-100 hover:bg-zinc-200 hover:text-zinc-600",
+                    )}
+                  >
+                    <X className="h-3 w-3" />
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={addTab}
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600"
+            title="New chat"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Active conversation */}
+      <ConversationView
+        key={activeTab.id}
+        tab={activeTab}
+        workspaceId={workspaceId}
+        onUpdate={(interactions) => updateTabInteractions(activeTab.id, interactions)}
+      />
     </div>
   );
 }

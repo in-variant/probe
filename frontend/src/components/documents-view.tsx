@@ -206,7 +206,7 @@ function BulkActionsBar({
 
 type DrawerTab = "details" | "activity" | "versions";
 
-function DetailDrawer({
+export function DetailDrawer({
   file,
   workspaceId,
   onClose,

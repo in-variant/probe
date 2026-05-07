@@ -100,6 +100,77 @@ Return ONLY valid JSON — no markdown fencing, no explanation outside the array
 If no documents match, return an empty array [].
 Sort by score descending. Return at most 20 results."""
 
+SUMMARY_SYSTEM_PROMPT = """You are a precise information retrieval assistant. You will be given document contents and a user query. Your job is to produce a short, direct answer to the query based solely on the provided documents.
+
+Format your response in clean markdown:
+- Use **bold** for key terms or values.
+- Use bullet points for lists of facts.
+- Use `code` formatting for technical identifiers, file names, or values.
+- Use headings (##, ###) only if the answer has distinct sections.
+- Keep paragraphs short (1-2 sentences each).
+
+Rules:
+- Be precise and to the point. No filler, no fluff.
+- Do not use em dashes.
+- Use plain, clear language.
+- If the documents contain a direct answer, state it.
+- If they contain partial or indirect information, say what is available.
+- If nothing relevant is found, say so in one sentence.
+- Keep the summary under 150 words.
+- Do not repeat the query back. Just answer it."""
+
+MAX_CONTENT_BYTES_PER_FILE = 30_000
+MAX_FILES_FOR_SUMMARY = 5
+
+
+def _read_file_text(workspace_id: str, doc_path: str) -> str | None:
+    """Read a file from the local cache and return its text content, or None."""
+    prefix = workspace_prefix(workspace_id).rstrip("/")
+    rel_path = f"{prefix}{doc_path}"
+    raw = local_cache.read_file(rel_path)
+    if raw is None:
+        return None
+    raw = raw[:MAX_CONTENT_BYTES_PER_FILE]
+    try:
+        return raw.decode("utf-8", errors="replace")
+    except Exception:
+        return None
+
+
+def _generate_summary(query: str, results: list[dict[str, Any]], workspace_id: str) -> str:
+    """Read top matched files and ask the LLM for a precise summary."""
+    if not results:
+        return ""
+
+    file_sections: list[str] = []
+    for r in results[:MAX_FILES_FOR_SUMMARY]:
+        text = _read_file_text(workspace_id, r.get("path", ""))
+        if not text or not text.strip():
+            continue
+        file_sections.append(f"--- {r.get('name', 'unknown')} ---\n{text}")
+
+    if not file_sections:
+        return ""
+
+    combined = "\n\n".join(file_sections)
+    user_msg = f"Query: {query}\n\nDocument contents:\n{combined}"
+
+    try:
+        client = _get_openai_client()
+        completion = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.1,
+            max_tokens=300,
+        )
+        return (completion.choices[0].message.content or "").strip()
+    except Exception:
+        logger.exception("Summary generation failed")
+        return ""
+
 
 def _build_user_prompt(query: str, documents: list[dict[str, Any]]) -> str:
     doc_listing = "\n".join(
@@ -130,10 +201,11 @@ def _upload_interaction_async(local_path: Path, gcs_key: str):
             pass
 
 
-def search_documents(workspace_id: str, query: str) -> dict[str, Any]:
+def search_documents(workspace_id: str, query: str, session_id: str) -> dict[str, Any]:
     """
     Run an AI-powered document search against a workspace.
     Returns the search results and logs the interaction to GCS.
+    Each interaction is uniquely identified and grouped by session_id.
     """
     interaction_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -145,6 +217,7 @@ def search_documents(workspace_id: str, query: str) -> dict[str, Any]:
 
     request_payload = {
         "interaction_id": interaction_id,
+        "session_id": session_id,
         "timestamp": timestamp,
         "workspace_id": workspace_id,
         "workspace_name": workspace_name,
@@ -157,7 +230,7 @@ def search_documents(workspace_id: str, query: str) -> dict[str, Any]:
             "results": [],
             "message": "No documents found in this workspace.",
         }
-        _log_interaction(interaction_id, timestamp, request_payload, response_payload)
+        _log_interaction(interaction_id, session_id, timestamp, request_payload, response_payload)
         return {"interaction_id": interaction_id, **response_payload}
 
     user_prompt = _build_user_prompt(query, documents)
@@ -200,6 +273,10 @@ def search_documents(workspace_id: str, query: str) -> dict[str, Any]:
             r["content_type"] = matched_doc.get("content_type")
             r["status"] = matched_doc.get("status")
 
+    summary = ""
+    if results and not error_message:
+        summary = _generate_summary(query, results, workspace_id)
+
     if error_message:
         message = error_message
     elif results:
@@ -207,14 +284,15 @@ def search_documents(workspace_id: str, query: str) -> dict[str, Any]:
     else:
         message = "No documents matched your query. Try rephrasing."
 
-    response_payload = {"results": results, "message": message}
-    _log_interaction(interaction_id, timestamp, request_payload, response_payload)
+    response_payload = {"results": results, "message": message, "summary": summary}
+    _log_interaction(interaction_id, session_id, timestamp, request_payload, response_payload)
 
     return {"interaction_id": interaction_id, **response_payload}
 
 
 def _log_interaction(
     interaction_id: str,
+    session_id: str,
     timestamp: str,
     request_payload: dict,
     response_payload: dict,
@@ -224,6 +302,7 @@ def _log_interaction(
 
     interaction_record = {
         "interaction_id": interaction_id,
+        "session_id": session_id,
         "timestamp": timestamp,
         "request": request_payload,
         "response": response_payload,
@@ -232,7 +311,7 @@ def _log_interaction(
     local_path = IR_LOCAL_DIR / f"{interaction_id}.json"
     local_path.write_text(json.dumps(interaction_record, indent=2, default=str), encoding="utf-8")
 
-    gcs_key = f"{IR_FOLDER}/{interaction_id}.json"
+    gcs_key = f"{IR_FOLDER}/{session_id}/{interaction_id}.json"
     thread = threading.Thread(
         target=_upload_interaction_async,
         args=(local_path, gcs_key),
