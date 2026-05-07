@@ -26,6 +26,10 @@ export interface Workspace {
   updated_at: string;
   file_count: number;
   folder_count: number;
+  gdrive_import_status?: "importing" | "completed" | "failed";
+  gdrive_imported_count?: number;
+  gdrive_total_count?: number;
+  google_drive_folder_id?: string;
 }
 
 // ── Document types ─────────────────────────────────────────────
@@ -61,12 +65,17 @@ export async function listWorkspaces(): Promise<Workspace[]> {
 
 export async function createWorkspace(
   name: string,
-  status: string = "active"
+  status: string = "active",
+  googleDriveFolderId?: string,
+  gdriveSessionToken?: string,
 ): Promise<Workspace> {
+  const payload: Record<string, string> = { name, status };
+  if (googleDriveFolderId) payload.google_drive_folder_id = googleDriveFolderId;
+  if (gdriveSessionToken) payload.gdrive_session_token = gdriveSessionToken;
   return request<Workspace>("/api/workspaces", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, status }),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -265,5 +274,63 @@ export async function searchDocuments(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workspace_id: workspaceId, query, session_id: sessionId }),
+  });
+}
+
+// ── Google Drive API ────────────────────────────────────────────
+
+export interface GDriveFolder {
+  id: string;
+  name: string;
+  mimeType: string;
+}
+
+export interface GDriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  modifiedTime?: string;
+}
+
+export interface GDriveBrowseResponse {
+  folder_id: string;
+  folders: GDriveFolder[];
+  files: GDriveFile[];
+}
+
+export async function getGDriveAuthUrl(state: string = ""): Promise<{ url: string; flow_id: string }> {
+  const origin = window.location.origin;
+  const params = new URLSearchParams({ origin, state });
+  return request(`/api/gdrive/auth-url?${params}`);
+}
+
+export async function exchangeGDriveCode(code: string, flowId: string): Promise<{ session_token: string }> {
+  const origin = window.location.origin;
+  return request("/api/gdrive/callback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, origin, flow_id: flowId }),
+  });
+}
+
+export async function browseGDriveFolder(
+  sessionToken: string,
+  folderId: string = "root"
+): Promise<GDriveBrowseResponse> {
+  const params = new URLSearchParams({ session_token: sessionToken, folder_id: folderId });
+  return request(`/api/gdrive/folders?${params}`);
+}
+
+export async function importGDriveFolder(
+  workspaceId: string,
+  sessionToken: string,
+  folderId: string,
+  recursive: boolean = true
+): Promise<{ imported_count: number; error_count: number }> {
+  return request(`/api/gdrive/import/${workspaceId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken, folder_id: folderId, recursive }),
   });
 }

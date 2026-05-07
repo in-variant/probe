@@ -21,6 +21,7 @@ import {
   deleteWorkspace,
   type Workspace,
 } from "@/lib/api";
+import { GoogleDrivePicker } from "@/components/google-drive-picker";
 
 type StatusFilter = "all" | "active" | "on-hold" | "completed";
 type SortKey = "updated_at" | "name" | "created_at";
@@ -341,6 +342,10 @@ function CreateWorkspaceModal({
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [driveFolderId, setDriveFolderId] = useState<string | undefined>();
+  const [driveFolderName, setDriveFolderName] = useState<string | undefined>();
+  const [driveSessionToken, setDriveSessionToken] = useState<string | undefined>();
+
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -349,7 +354,7 @@ function CreateWorkspaceModal({
     setError("");
     setLoading(true);
     try {
-      await createWorkspace(name.trim(), status);
+      await createWorkspace(name.trim(), status, driveFolderId, driveSessionToken);
       onCreated();
       onClose();
     } catch (err) {
@@ -404,6 +409,30 @@ function CreateWorkspaceModal({
               ))}
             </div>
           </div>
+
+          {/* Google Drive integration */}
+          <div>
+            <label className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">
+              Import from Google Drive
+            </label>
+            <div className="mt-1.5">
+              <GoogleDrivePicker
+                selectedFolderId={driveFolderId}
+                selectedFolderName={driveFolderName}
+                onSelect={(folderId, folderName, sessionToken) => {
+                  setDriveFolderId(folderId);
+                  setDriveFolderName(folderName);
+                  setDriveSessionToken(sessionToken);
+                }}
+                onClear={() => {
+                  setDriveFolderId(undefined);
+                  setDriveFolderName(undefined);
+                  setDriveSessionToken(undefined);
+                }}
+              />
+            </div>
+          </div>
+
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="rounded-full px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100">Cancel</button>
             <button

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FolderOpen, Home, Menu, Settings, X } from "lucide-react";
+import { FolderOpen, Home, Menu, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -10,10 +10,6 @@ import { ProbeLogo } from "@/components/probe-logo";
 const NAV_ITEMS = [
   { href: "/", icon: Home, label: "Home" },
   { href: "/workspaces", icon: FolderOpen, label: "Workspaces" },
-] as const;
-
-const BOTTOM_NAV = [
-  { href: "/settings", icon: Settings, label: "Settings" },
 ] as const;
 
 function NavLink({
@@ -51,7 +47,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pageTitle = (() => {
     if (pathname === "/") return "Home";
     if (pathname.startsWith("/workspaces")) return "Workspaces";
-    if (pathname.startsWith("/settings")) return "Settings";
     return "Dashboard";
   })();
 
@@ -68,11 +63,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <NavLink key={item.href} {...item} />
             ))}
           </nav>
-          <div className="mt-auto pt-6 border-t border-zinc-200/70 mt-8">
-            {BOTTOM_NAV.map((item) => (
-              <NavLink key={item.href} {...item} />
-            ))}
-          </div>
         </aside>
 
         <div className="flex h-full flex-1 flex-col overflow-hidden">
@@ -119,19 +109,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <NavLink key={item.href} {...item} />
               ))}
             </nav>
-            <div className="mt-8 border-t border-zinc-200/70 pt-6">
-              {BOTTOM_NAV.map((item) => (
-                <NavLink key={item.href} {...item} />
-              ))}
-            </div>
           </div>
         </div>
       )}
 
       {/* Mobile bottom nav */}
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
-        <div className="grid grid-cols-3 gap-1">
-          {[...NAV_ITEMS, ...BOTTOM_NAV].map((item) => {
+        <div className="grid grid-cols-2 gap-1">
+          {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             return (

@@ -48,8 +48,10 @@ import {
   bulkDeleteFiles,
   getDownloadUrl,
   updateFile,
+  getWorkspace,
   type FolderItem,
   type FileItem,
+  type Workspace,
 } from "@/lib/api";
 
 // ── Icon map ─────────────────────────────────────────────────────
@@ -693,6 +695,130 @@ function CreateFolderModal({
   );
 }
 
+// ── Google Drive Import Banner ───────────────────────────────────
+
+function GDriveImportBanner({
+  workspaceId,
+  onImportComplete,
+}: {
+  workspaceId: string;
+  onImportComplete: () => void;
+}) {
+  const [status, setStatus] = useState<string | null>(null);
+  const [imported, setImported] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function check() {
+      try {
+        const ws = await getWorkspace(workspaceId);
+        if (!active) return;
+        setStatus(ws.gdrive_import_status ?? null);
+        setImported(ws.gdrive_imported_count ?? 0);
+        setTotal(ws.gdrive_total_count ?? 0);
+
+        if (ws.gdrive_import_status === "completed" || ws.gdrive_import_status === "failed") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          onImportComplete();
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    check();
+    pollRef.current = setInterval(check, 3000);
+
+    return () => {
+      active = false;
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [workspaceId, onImportComplete]);
+
+  if (!status || dismissed) return null;
+
+  if (status === "completed") {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3">
+        <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-emerald-800">
+            Google Drive import complete
+          </p>
+          <p className="text-xs text-emerald-600">
+            {imported} file{imported !== 1 ? "s" : ""} imported successfully
+          </p>
+        </div>
+        <button
+          onClick={() => setDismissed(true)}
+          className="shrink-0 rounded-lg p-1 text-emerald-400 hover:bg-emerald-100 hover:text-emerald-600"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-3">
+        <AlertCircle className="h-5 w-5 shrink-0 text-rose-500" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-rose-800">
+            Google Drive import failed
+          </p>
+          <p className="text-xs text-rose-600">
+            Some files could not be imported. {imported > 0 ? `${imported} file${imported !== 1 ? "s" : ""} were imported before the error.` : ""}
+          </p>
+        </div>
+        <button
+          onClick={() => setDismissed(true)}
+          className="shrink-0 rounded-lg p-1 text-rose-400 hover:bg-rose-100 hover:text-rose-600"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
+
+  const pct = total > 0 ? Math.round((imported / total) * 100) : 0;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-blue-200 bg-blue-50/70">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-blue-500" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-blue-800">
+            Importing files from Google Drive…
+          </p>
+          <p className="text-xs text-blue-600">
+            {total > 0
+              ? `${imported} of ${total} file${total !== 1 ? "s" : ""} imported`
+              : "Scanning folder…"}
+          </p>
+        </div>
+        {total > 0 && (
+          <span className="shrink-0 text-xs font-medium tabular-nums text-blue-700">
+            {pct}%
+          </span>
+        )}
+      </div>
+      {total > 0 && (
+        <div className="h-1 w-full bg-blue-100">
+          <div
+            className="h-full bg-blue-500 transition-all duration-500 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Documents View ──────────────────────────────────────────
 
 export function DocumentsView({ workspaceId }: { workspaceId: string }) {
@@ -712,6 +838,7 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
   const [isDragging, setIsDragging] = useState(false);
   const [folderMenuOpen, setFolderMenuOpen] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [gdriveImporting, setGdriveImporting] = useState<boolean | null>(null);
   const dragCounter = useRef(0);
 
   const fetchDocuments = useCallback(async () => {
@@ -733,6 +860,16 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
     setSelectedFiles(new Set());
     fetchDocuments();
   }, [fetchDocuments]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getWorkspace(workspaceId).then((ws) => {
+      if (!cancelled) {
+        setGdriveImporting(ws.gdrive_import_status === "importing" || ws.gdrive_import_status === "completed" || ws.gdrive_import_status === "failed");
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [workspaceId]);
 
   useEffect(() => {
     if (!folderMenuOpen) return;
@@ -1001,6 +1138,16 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
             {syncing ? "Syncing changes..." : "All changes synced"}
           </p>
         </header>
+
+        {/* Google Drive import banner */}
+        {gdriveImporting && (
+          <div className="px-4 pt-3 md:px-6">
+            <GDriveImportBanner
+              workspaceId={workspaceId}
+              onImportComplete={fetchDocuments}
+            />
+          </div>
+        )}
 
         {/* Bulk actions */}
         {selectedFiles.size > 0 && (
