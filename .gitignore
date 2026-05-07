@@ -18,6 +18,7 @@ Thumbs.db
 !package.json
 !package-lock.json
 !tsconfig.json
+!backend/invariant-ai-dev-3eae095dc7b6.json
 
 # Python
 __pycache__/

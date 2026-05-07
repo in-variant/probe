@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "invariant-ai-dev",
+  "private_key_id": "3eae095dc7b62cfcad2033846134fbc203348e58",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC/wV/7TCaVS5wk\nE6GC73JfTYofGogILYUGLAPdnbfD06MAI5/wxkzONK0Rfy85cPYOHP78seqZ38q8\n/QPPJA/Sqy4P8xYEJ+mPtTyKFkMaqLavaQ7P3TbIp+tM/IaF0pS1IeOR2xacetsN\nvTUpGJ92quqed1Y9mSMILfITrNOzxgMCL6dlGInTBXFSYdXtaGhgmq09pdKQYFVa\nTeGZqlAPAUnDmbo678AZxiTPvBMbO5mZpXs8U+N2G2hQouMKanW5LzeoUrPEKOva\nxKpZ9XtPGzCRFg3PUNTtoiGtDuC+w0O6YRTnJD7F0F9G+VHs6ka1R0tEQxb6Sxsm\n1r2RM6afAgMBAAECggEADwwG6BqgUcl5GyufL5MdOnVEiA72QGNcs5Cd97SknZfs\ni9o/zA5Y1eWJnycyds4dFhvDC+Pk25DqwSG+5sZBp5pfJvPq9QXcwgt1ZgXmhh+v\nFjH8Q5DBom/q0EO7RU0HoPRj0yeKArAb+FwHNo5Zal/HFrWZQtl9ckAzZW/ZEkYu\nDc4T21duuGEBC03+ZfPun6URvVkQX7WReh1tJb+AVCkXCTyDIXeQt0rjwyHJ+Vfd\nf7/SpjUbPC20AOQ4KtgPpbnYAlLWoORoMhsDR81WZE7rHAFP8yVtvjC9zhd0S77C\n4TypoPViNY+Xz5Unak6wuHHl+DTxrJpzuY/sIvzZwQKBgQDen8njzbZAt32d1qQX\nkRrnuAS5XD9vndKNg47nFbF6wSbPxCIUoKJDvcByp+q96/rPmMFXqe8N5nl5j5dw\n1GFAhTQqUym8/4s8k/ZA4tz4bwZqvAwCY3LQrH3FTQyonDr8v2T6linBCjd3j8bV\nXd9w/KI721T3w6AkhZiZ/nD/eQKBgQDcgNspRS7xcDxsDyMCmDASGjs37M8rfNgx\nHzaef1woBYC2z/eHb/SR/Mv/pQ1pVrhAXYxXTtaofw8bXDaaJdRiP2ORvPVHSquz\nmTbhU8EwKMKy1jaEQ3Gm4wjQ+9sSvY9QmsRW932ecNaQRvqmiH/VCMJX2cBuHsRv\nKYYRo/fY1wKBgHtc2Ccf6wpZo4Y/VpaoldwpoJSGhbB4KCC68gkjgEGhnrwq1yfP\nC5u2Hlpqqi2sAkPfReQqCooNWOr/os+nIGz8YzfA9bQBd0qOQzsZe5E/FLM4mP8J\n1KnFq7wVQhp82EMOXApwA5sw6iOazHeXmSWnGM9Kbv8MrEUQsstCr6MhAoGATDiG\niYeOqIrBeCDrWzQ8OaWznqtPGZs4KBLAEJ25v2PXkFnnGHwMsIIQCjiFoEoHusgb\ngPqRnQD+udhwT2yQM73xrykAKDqZi6WEoPMQrpMIakU95w5hNOz52TOWEK5R4ez9\nvYojdCdRI+JFNlesyHkUpMVyjR45jKtv2p0xSVUCgYBkpUhX0G9pg/vJ70NpGUNY\nJY9dLQirpEz7vMBJPjSFWPMlZYNQRtlyRn9+Ol//Pi1GtWcmUeHYFRwnPR9Pzib/\nz2rZOsNWCc7OH1Ruhly7qQ20g+9nXGJ79k3dMURrJ+A4lY/k+9KycfXeGbc2415u\nn9nyFzfj5q9V229j93Dj0g==\n-----END PRIVATE KEY-----\n",
+  "client_email": "github-deploy@invariant-ai-dev.iam.gserviceaccount.com",
+  "client_id": "115059500805095484948",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/github-deploy%40invariant-ai-dev.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
