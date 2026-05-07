@@ -44,8 +44,35 @@ jobs:
             echo "backend=false" >> $GITHUB_OUTPUT
           fi
 
-  deploy-frontend:
+  setup-registry:
     needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Ensure Artifact Registry repository exists
+        run: |
+          gcloud artifacts repositories describe ${{ env.REPOSITORY }} \
+            --location=${{ env.REGION }} --quiet 2>/dev/null || \
+          gcloud artifacts repositories create ${{ env.REPOSITORY }} \
+            --repository-format=docker \
+            --location=${{ env.REGION }} \
+            --description="Probe container images"
+
+  deploy-frontend:
+    needs: [detect-changes, setup-registry]
     if: needs.detect-changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -91,7 +118,7 @@ jobs:
             --port 8080
 
   deploy-backend:
-    needs: detect-changes
+    needs: [detect-changes, setup-registry]
     if: needs.detect-changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     permissions:
