@@ -26,6 +26,19 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8080   # http://localhost:8080
 ```
 
+### Testing
+
+Run the backend test suite from the `backend/` directory:
+
+```bash
+cd backend
+pytest                        # run all tests
+pytest -v                     # verbose output
+pytest --cov=. --cov-report=term-missing   # with coverage report
+```
+
+CI enforces a minimum of **70%** code coverage. The workflow runs automatically on pushes to `main` and on pull requests that touch `backend/`.
+
 ### API
 
 | Method | Path          | Description  |
