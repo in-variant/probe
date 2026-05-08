@@ -21,13 +21,17 @@ function ScanLines() {
   );
 }
 
-export function ProbeLogo() {
+export function ProbeLogo({ size = "default" }: { size?: "default" | "lg" }) {
+  const isLg = size === "lg";
+  const svgWidth = isLg ? 80 : 32;
+  const svgHeight = isLg ? 70 : 28;
+
   return (
-    <div className="flex items-center gap-3">
+    <div className={`flex items-center ${isLg ? "gap-5" : "gap-3"}`}>
       <svg
         viewBox="0 0 32 28"
-        width={32}
-        height={28}
+        width={svgWidth}
+        height={svgHeight}
         fill="none"
         className="shrink-0 text-zinc-900"
         aria-hidden="true"
@@ -86,10 +90,10 @@ export function ProbeLogo() {
       </svg>
 
       <div>
-        <p className="text-[10px] uppercase tracking-[0.16em] text-zinc-400 leading-tight">
+        <p className={`uppercase tracking-[0.16em] text-zinc-400 leading-tight ${isLg ? "text-sm" : "text-[10px]"}`}>
           Invariant AI
         </p>
-        <p className="text-lg font-semibold tracking-[-0.02em] text-zinc-900 leading-tight mt-0.5">
+        <p className={`font-semibold tracking-[-0.02em] text-zinc-900 leading-tight mt-0.5 ${isLg ? "text-3xl" : "text-lg"}`}>
           Probe
         </p>
       </div>
