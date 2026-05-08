@@ -369,11 +369,16 @@ class TestDownloadUrl:
     @pytest.mark.asyncio
     async def test_success(self, client: AsyncClient):
         from unittest.mock import patch, MagicMock
+        import google.auth.credentials
         _seed_workspace("ws-dls")
         _seed_file("ws-dls", "dl.txt")
         bucket_mock = MagicMock()
         bucket_mock.blob.return_value.generate_signed_url.return_value = "https://signed.url"
-        with patch("routers.documents.get_bucket", return_value=bucket_mock):
+        creds_mock = MagicMock(spec=google.auth.credentials.Signing)
+        with (
+            patch("routers.documents.get_bucket", return_value=bucket_mock),
+            patch("gcs_client.get_credentials", return_value=creds_mock),
+        ):
             resp = await client.get(
                 "/api/workspaces/ws-dls/files/download-url",
                 params={"path": "dl.txt"},

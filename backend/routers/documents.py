@@ -527,5 +527,22 @@ async def get_download_url(
 
     bucket = get_bucket()
     blob = bucket.blob(file_path)
-    url = blob.generate_signed_url(expiration=timedelta(hours=1), method="GET")
+
+    from gcs_client import get_credentials
+    import google.auth
+    import google.auth.transport.requests
+    credentials = get_credentials()
+
+    signing_kwargs: dict = {}
+    if not isinstance(credentials, google.auth.credentials.Signing):
+        if not credentials.valid:
+            credentials.refresh(google.auth.transport.requests.Request())
+        signing_kwargs["service_account_email"] = credentials.service_account_email
+        signing_kwargs["access_token"] = credentials.token
+
+    url = blob.generate_signed_url(
+        expiration=timedelta(hours=1),
+        method="GET",
+        **signing_kwargs,
+    )
     return {"url": url, "expires_in": 3600}
