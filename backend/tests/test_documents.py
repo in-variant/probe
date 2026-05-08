@@ -64,6 +64,8 @@ class TestListDocuments:
         _seed_workspace("ws-ld")
         prefix = workspace_prefix("ws-ld")
         write_file_blob(f"{prefix}myfolder/.keep", b"")
+        write_file_blob(f"{prefix}myfolder/nested/a.txt", b"a")
+        write_file_blob(f"{prefix}myfolder/nested/b.txt", b"b")
         write_json_blob(f"{prefix}myfolder/.folder-meta.json", {
             "name": "myfolder",
             "created_at": "2025-01-01T00:00:00+00:00",
@@ -73,6 +75,7 @@ class TestListDocuments:
         folders = resp.json()["folders"]
         assert len(folders) == 1
         assert folders[0]["name"] == "myfolder"
+        assert folders[0]["file_count"] == 2
 
     @pytest.mark.asyncio
     async def test_subpath_listing(self, client: AsyncClient):
@@ -228,6 +231,29 @@ class TestGetFile:
         assert resp.status_code == 404
 
 
+class TestGetFileContent:
+    @pytest.mark.asyncio
+    async def test_success(self, client: AsyncClient):
+        _seed_workspace("ws-gfc")
+        _seed_file("ws-gfc", "notes.md", b"# hello")
+        resp = await client.get(
+            "/api/workspaces/ws-gfc/files/content",
+            params={"path": "notes.md"},
+        )
+        assert resp.status_code == 200
+        assert resp.text == "# hello"
+        assert resp.headers.get("content-type", "").startswith("text/plain")
+
+    @pytest.mark.asyncio
+    async def test_not_found(self, client: AsyncClient):
+        _seed_workspace("ws-gfcnf")
+        resp = await client.get(
+            "/api/workspaces/ws-gfcnf/files/content",
+            params={"path": "missing.md"},
+        )
+        assert resp.status_code == 404
+
+
 class TestUpdateFile:
     @pytest.mark.asyncio
     async def test_update_status(self, client: AsyncClient):
@@ -355,3 +381,33 @@ class TestDownloadUrl:
         assert resp.status_code == 200
         assert resp.json()["url"] == "https://signed.url"
         assert resp.json()["expires_in"] == 3600
+
+
+class TestZipImport:
+    @pytest.mark.asyncio
+    async def test_import_zip_extracts_to_named_folder(self, client: AsyncClient):
+        import zipfile
+
+        _seed_workspace("ws-zip")
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as zf:
+            zf.writestr("sub/hello.txt", "hello")
+            zf.writestr("readme.md", "# readme")
+        payload.seek(0)
+
+        resp = await client.post(
+            "/api/workspaces/ws-zip/files/import-zip",
+            files={"file": ("bundle.zip", payload.getvalue(), "application/zip")},
+            data={"path": "/target"},
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["folder_path"] == "target/bundle"
+        assert body["imported_count"] == 2
+
+        listing = await client.get("/api/workspaces/ws-zip/documents", params={"path": "/target/bundle"})
+        assert listing.status_code == 200
+        root_files = listing.json()["files"]
+        root_folders = listing.json()["folders"]
+        assert any(f["name"] == "readme.md" for f in root_files)
+        assert any(f["name"] == "sub" for f in root_folders)

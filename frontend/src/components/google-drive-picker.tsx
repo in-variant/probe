@@ -11,6 +11,8 @@ import {
 import { cn } from "@/lib/utils";
 import {
   browseGDriveFolder,
+  importGDriveFolder,
+  importGDriveSelection,
   type GDriveFolder,
   type GDriveFile,
 } from "@/lib/api";
@@ -209,22 +211,31 @@ export function GoogleDriveFolderPicker({
 
 interface DriveFileBrowserProps {
   workspaceId: string;
+  currentPath: string;
   onImportComplete: () => void;
 }
 
 export function DriveFileBrowser({
   workspaceId,
+  currentPath,
   onImportComplete,
 }: DriveFileBrowserProps) {
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [folders, setFolders] = useState<GDriveFolder[]>([]);
   const [files, setFiles] = useState<GDriveFile[]>([]);
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
+  const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(new Set());
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([
     { id: "root", name: "My Drive" },
   ]);
 
   const currentFolderId = breadcrumbs[breadcrumbs.length - 1]?.id ?? "root";
+
+  function clearSelection() {
+    setSelectedFileIds(new Set());
+    setSelectedFolderIds(new Set());
+  }
 
   const loadFolder = useCallback(async (folderId: string) => {
     setLoading(true);
@@ -244,11 +255,10 @@ export function DriveFileBrowser({
     loadFolder(currentFolderId);
   }, [currentFolderId, loadFolder]);
 
-  async function handleImport() {
+  async function handleImportFolder() {
     setImporting(true);
     try {
-      const { importGDriveFolder } = await import("@/lib/api");
-      await importGDriveFolder(workspaceId, currentFolderId, true);
+      await importGDriveFolder(workspaceId, currentFolderId, true, currentPath);
       onImportComplete();
     } catch {
       // error handled by caller
@@ -256,6 +266,44 @@ export function DriveFileBrowser({
       setImporting(false);
     }
   }
+
+  async function handleImportSelection() {
+    if (selectedFileIds.size === 0 && selectedFolderIds.size === 0) return;
+    setImporting(true);
+    try {
+      await importGDriveSelection(workspaceId, {
+        parent_folder_id: currentFolderId,
+        file_ids: Array.from(selectedFileIds),
+        folder_ids: Array.from(selectedFolderIds),
+        target_path: currentPath,
+      });
+      onImportComplete();
+    } catch {
+      // error handled by caller
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function toggleFile(fileId: string) {
+    setSelectedFileIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) next.delete(fileId);
+      else next.add(fileId);
+      return next;
+    });
+  }
+
+  function toggleFolder(folderId: string) {
+    setSelectedFolderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
+      return next;
+    });
+  }
+
+  const selectedCount = selectedFileIds.size + selectedFolderIds.size;
 
   return (
     <div className="flex flex-col">
@@ -268,7 +316,10 @@ export function DriveFileBrowser({
               {i > 0 && <ChevronRight className="h-3 w-3 text-zinc-300" />}
               <button
                 type="button"
-                onClick={() => setBreadcrumbs((p) => p.slice(0, i + 1))}
+                onClick={() => {
+                  clearSelection();
+                  setBreadcrumbs((p) => p.slice(0, i + 1));
+                }}
                 className={cn(
                   "rounded px-1 py-0.5 transition-colors",
                   i === breadcrumbs.length - 1
@@ -294,26 +345,37 @@ export function DriveFileBrowser({
         ) : (
           <div>
             {folders.map((folder) => (
-              <button
-                key={folder.id}
-                type="button"
-                onClick={() =>
-                  setBreadcrumbs((p) => [...p, { id: folder.id, name: folder.name }])
-                }
-                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-zinc-50"
-              >
-                <Folder className="h-4 w-4 shrink-0 text-blue-500" />
-                <span className="min-w-0 flex-1 truncate text-zinc-700">{folder.name}</span>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-300" />
-              </button>
+              <div key={folder.id} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm transition-colors hover:bg-zinc-50">
+                <input
+                  type="checkbox"
+                  checked={selectedFolderIds.has(folder.id)}
+                  onChange={() => toggleFolder(folder.id)}
+                  className="h-4 w-4 rounded border-zinc-300 accent-blue-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearSelection();
+                    setBreadcrumbs((p) => [...p, { id: folder.id, name: folder.name }]);
+                  }}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                >
+                  <Folder className="h-4 w-4 shrink-0 text-blue-500" />
+                  <span className="min-w-0 flex-1 truncate text-zinc-700">{folder.name}</span>
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-300" />
+                </button>
+              </div>
             ))}
             {files.map((file) => (
-              <div
-                key={file.id}
-                className="flex items-center gap-2.5 px-3 py-2.5 text-sm opacity-50"
-              >
-                <FileText className="h-4 w-4 shrink-0 text-zinc-400" />
-                <span className="min-w-0 flex-1 truncate text-zinc-500">{file.name}</span>
+              <div key={file.id} className="flex items-center gap-2.5 px-3 py-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={selectedFileIds.has(file.id)}
+                  onChange={() => toggleFile(file.id)}
+                  className="h-4 w-4 rounded border-zinc-300 accent-blue-600"
+                />
+                <FileText className="h-4 w-4 shrink-0 text-zinc-500" />
+                <span className="min-w-0 flex-1 truncate text-zinc-600">{file.name}</span>
               </div>
             ))}
           </div>
@@ -325,24 +387,35 @@ export function DriveFileBrowser({
         <p className="text-xs text-zinc-400">
           {folders.length} folder{folders.length !== 1 ? "s" : ""}, {files.length} file{files.length !== 1 ? "s" : ""}
         </p>
-        <button
-          type="button"
-          onClick={handleImport}
-          disabled={importing}
-          className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-        >
-          {importing ? (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Importing…
-            </>
-          ) : (
-            <>
-              <Check className="h-3 w-3" />
-              Import from this folder
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleImportSelection}
+            disabled={importing || selectedCount === 0}
+            className="inline-flex items-center gap-1.5 rounded-full border border-zinc-300 bg-white px-4 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50"
+          >
+            {importing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+            Import selected {selectedCount > 0 ? `(${selectedCount})` : ""}
+          </button>
+          <button
+            type="button"
+            onClick={handleImportFolder}
+            disabled={importing}
+            className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+          >
+            {importing ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Importing…
+              </>
+            ) : (
+              <>
+                <Check className="h-3 w-3" />
+                Import entire folder
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -39,20 +40,23 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import ReactMarkdown from "react-markdown";
+import mermaid from "mermaid";
 import { cn, formatBytes, formatDate, formatRelativeDate, getFileIcon, getFileIconTone } from "@/lib/utils";
 import {
   listDocuments,
   createFolder,
   deleteFolder,
   uploadFilesWithProgress,
+  uploadAndExtractZip,
   deleteFile,
   bulkDeleteFiles,
   getDownloadUrl,
+  getFileTextContent,
   updateFile,
   getWorkspace,
   type FolderItem,
   type FileItem,
-  type Workspace,
 } from "@/lib/api";
 import { DriveFileBrowser } from "@/components/google-drive-picker";
 
@@ -216,11 +220,13 @@ export function DetailDrawer({
   workspaceId,
   onClose,
   onRefresh,
+  onPreview,
 }: {
   file: FileItem;
   workspaceId: string;
   onClose: () => void;
   onRefresh: () => void;
+  onPreview?: (file: FileItem) => void;
 }) {
   const [tab, setTab] = useState<DrawerTab>("details");
   const [status, setStatus] = useState(file.status);
@@ -389,6 +395,12 @@ export function DetailDrawer({
           <div className="flex items-center justify-between border-t border-zinc-200 px-4 py-4 sm:px-5">
             <div className="flex items-center gap-2">
               <button
+                onClick={() => onPreview?.(file)}
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 transition-colors"
+              >
+                Preview
+              </button>
+              <button
                 onClick={handleDownload}
                 className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 transition-colors"
               >
@@ -417,9 +429,224 @@ export function DetailDrawer({
   );
 }
 
+function MermaidBlock({ chart }: { chart: string }) {
+  const [svg, setSvg] = useState<string>("");
+  const [error, setError] = useState<string>("");
+  const id = useId();
+
+  useEffect(() => {
+    let cancelled = false;
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default",
+      securityLevel: "strict",
+    });
+    mermaid
+      .render(`mermaid-${id.replace(/[:]/g, "-")}`, chart)
+      .then(({ svg: renderedSvg }) => {
+        if (!cancelled) setSvg(renderedSvg);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to render Mermaid diagram");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chart, id]);
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+        Mermaid render error: {error}
+      </div>
+    );
+  }
+
+  if (!svg) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-500">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Rendering diagram...
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="overflow-x-auto rounded-lg border border-zinc-200 bg-white p-2"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
+
+type PreviewKind = "image" | "pdf" | "office" | "markdown" | "text" | "unsupported";
+
+function FilePreviewModal({
+  file,
+  workspaceId,
+  onClose,
+}: {
+  file: FileItem;
+  workspaceId: string;
+  onClose: () => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [viewerLoading, setViewerLoading] = useState(true);
+  const [error, setError] = useState<string>("");
+  const [textContent, setTextContent] = useState<string | null>(null);
+
+  const extension = (file.extension || "").toLowerCase();
+  const previewKind: PreviewKind = useMemo(() => {
+    if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(extension)) return "image";
+    if (extension === "pdf") return "pdf";
+    if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(extension)) return "office";
+    if (extension === "md" || extension === "markdown") return "markdown";
+    if (["txt", "text", "log", "csv", "json", "yaml", "yml", "xml"].includes(extension)) return "text";
+    return "unsupported";
+  }, [extension]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDownloadUrl(workspaceId, file.path)
+      .then(({ url }) => {
+        if (cancelled) return;
+        setPreviewUrl(url);
+        if (previewKind === "markdown" || previewKind === "text") {
+          getFileTextContent(workspaceId, file.path)
+            .then((text) => {
+              if (!cancelled) {
+                setTextContent(text);
+                setViewerLoading(false);
+              }
+            })
+            .catch((err) => {
+              if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load text preview");
+            });
+        } else if (previewKind === "unsupported") {
+          setViewerLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load preview");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, file.path, previewKind]);
+
+  const officeViewerUrl = previewUrl
+    ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(previewUrl)}`
+    : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+          <div className="min-w-0">
+            <h3 className="truncate text-sm font-semibold text-zinc-900">{file.name}</h3>
+            <p className="truncate text-xs text-zinc-500">{file.path}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="relative flex-1 bg-zinc-50">
+          {loading ? (
+            <div className="flex h-full items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
+            </div>
+          ) : error ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
+              <AlertCircle className="h-8 w-8 text-rose-500" />
+              <p className="text-sm text-zinc-700">Unable to preview this file.</p>
+              <p className="text-xs text-zinc-500">{error}</p>
+            </div>
+          ) : previewKind === "image" && previewUrl ? (
+            <div className="flex h-full items-center justify-center p-4">
+              <img
+                src={previewUrl}
+                alt={file.name}
+                onLoad={() => setViewerLoading(false)}
+                onError={() => {
+                  setViewerLoading(false);
+                  setError("Failed to render image preview");
+                }}
+                className="max-h-full max-w-full object-contain"
+              />
+            </div>
+          ) : previewKind === "pdf" && previewUrl ? (
+            <iframe
+              title={`Preview ${file.name}`}
+              src={previewUrl}
+              onLoad={() => setViewerLoading(false)}
+              className="h-full w-full border-0 bg-white"
+            />
+          ) : previewKind === "office" && officeViewerUrl ? (
+            <iframe
+              title={`Preview ${file.name}`}
+              src={officeViewerUrl}
+              onLoad={() => setViewerLoading(false)}
+              className="h-full w-full border-0 bg-white"
+            />
+          ) : previewKind === "markdown" && textContent !== null ? (
+            <div className="h-full overflow-y-auto bg-white p-6">
+              <article className="prose prose-zinc max-w-none prose-pre:bg-zinc-100 prose-pre:text-zinc-800 prose-code:text-zinc-800">
+                <ReactMarkdown
+                  components={{
+                    code({ className, children, ...props }) {
+                      const match = /language-(\w+)/.exec(className || "");
+                      const language = match?.[1] ?? "";
+                      const code = String(children).replace(/\n$/, "");
+                      if (language.toLowerCase() === "mermaid") {
+                        return <MermaidBlock chart={code} />;
+                      }
+                      return (
+                        <code className={className} {...props}>
+                          {children}
+                        </code>
+                      );
+                    },
+                    pre({ children }) {
+                      return <pre className="overflow-x-auto rounded-lg bg-zinc-100 p-3 text-zinc-800">{children}</pre>;
+                    },
+                  }}
+                >
+                  {textContent}
+                </ReactMarkdown>
+              </article>
+            </div>
+          ) : previewKind === "text" && textContent !== null ? (
+            <pre className="h-full overflow-auto bg-white p-6 text-sm leading-6 text-zinc-800">{textContent}</pre>
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
+              <AlertCircle className="h-8 w-8 text-zinc-400" />
+              <p className="text-sm text-zinc-700">Preview is not available for this file type yet.</p>
+            </div>
+          )}
+          {!loading && !error && viewerLoading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/75">
+              <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-600 shadow-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading preview...
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Add File modal (tabbed: Local Upload / Google Drive) ─────────
 
-type AddFileTab = "local" | "drive";
+type AddFileTab = "local" | "drive" | "zip";
 type UploadState = "selecting" | "uploading" | "done" | "error";
 
 function AddFileModal({
@@ -443,6 +670,7 @@ function AddFileModal({
   const [progress, setProgress] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [zipFile, setZipFile] = useState<File | null>(null);
   const filePickerRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<(() => void) | null>(null);
   const dragCounterRef = useRef(0);
@@ -522,6 +750,11 @@ function AddFileModal({
           <path d="M73.4 26.5 60.65 4.75c-.8-1.45-1.95-2.65-3.3-3.55L43.6 25l16.2 28.25H87.3c0-1.55-.4-3.1-1.2-4.5z" fill="#FFBA00"/>
         </svg>
       ),
+    },
+    {
+      key: "zip",
+      label: "Zip Upload",
+      icon: <Archive className="h-3.5 w-3.5" />,
     },
   ];
 
@@ -619,6 +852,7 @@ function AddFileModal({
             <div className="overflow-hidden rounded-xl border border-zinc-200">
               <DriveFileBrowser
                 workspaceId={workspaceId}
+                currentPath={currentPath}
                 onImportComplete={() => {
                   onUploaded();
                   onClose();
@@ -627,12 +861,39 @@ function AddFileModal({
             </div>
           )}
 
+          {uploadState === "selecting" && tab === "zip" && (
+            <div className="space-y-3">
+              <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-200 bg-zinc-50/50 py-8 transition-colors hover:border-blue-300 hover:bg-blue-50/50">
+                <Archive className="h-10 w-10 text-zinc-300" />
+                <p className="mt-3 text-sm font-medium text-zinc-700">Upload a zip archive</p>
+                <p className="mt-1 text-xs text-zinc-400">Contents will extract into a folder with the zip name</p>
+                <input
+                  type="file"
+                  accept=".zip,application/zip"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    setZipFile(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              {zipFile && (
+                <div className="rounded-lg bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+                  Selected: <span className="font-medium">{zipFile.name}</span> ({formatBytes(zipFile.size)})
+                </div>
+              )}
+            </div>
+          )}
+
           {uploadState === "uploading" && (
             <div className="py-6">
               <div className="flex flex-col items-center">
                 <Loader2 className="h-10 w-10 text-blue-500 animate-spin" />
-                <p className="mt-4 text-sm font-medium text-zinc-700">Uploading {stagedFiles.length} file{stagedFiles.length !== 1 ? "s" : ""}…</p>
-                <p className="mt-1 text-xs text-zinc-400">{formatBytes(totalSize)}</p>
+                <p className="mt-4 text-sm font-medium text-zinc-700">
+                  {tab === "zip" ? "Uploading and extracting archive…" : `Uploading ${stagedFiles.length} file${stagedFiles.length !== 1 ? "s" : ""}…`}
+                </p>
+                {tab !== "zip" ? <p className="mt-1 text-xs text-zinc-400">{formatBytes(totalSize)}</p> : null}
               </div>
               <div className="mt-6">
                 <div className="mb-2 flex items-center justify-between text-xs text-zinc-500">
@@ -651,8 +912,14 @@ function AddFileModal({
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
                 <CheckCircle2 className="h-7 w-7 text-emerald-500" />
               </div>
-              <p className="mt-4 text-sm font-medium text-zinc-800">{stagedFiles.length} file{stagedFiles.length !== 1 ? "s" : ""} uploaded successfully</p>
-              <p className="mt-1 text-xs text-zinc-400">{formatBytes(totalSize)} total</p>
+              {tab === "zip" ? (
+                <p className="mt-4 text-sm font-medium text-zinc-800">Zip uploaded and extracted successfully</p>
+              ) : (
+                <>
+                  <p className="mt-4 text-sm font-medium text-zinc-800">{stagedFiles.length} file{stagedFiles.length !== 1 ? "s" : ""} uploaded successfully</p>
+                  <p className="mt-1 text-xs text-zinc-400">{formatBytes(totalSize)} total</p>
+                </>
+              )}
             </div>
           )}
 
@@ -668,19 +935,41 @@ function AddFileModal({
         </div>
 
         {/* Footer (only for local upload tab) */}
-        {(uploadState !== "selecting" || tab === "local") && (
+        {(uploadState !== "selecting" || tab === "local" || tab === "zip") && (
           <div className="flex items-center justify-end gap-2 border-t border-zinc-100 px-4 py-4 sm:px-6">
             {uploadState === "selecting" && (
               <>
                 <button onClick={handleCancel} className="rounded-full px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 transition-colors">Cancel</button>
-                <button
-                  onClick={handleUpload}
-                  disabled={stagedFiles.length === 0}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Upload className="h-4 w-4" />
-                  Upload {stagedFiles.length > 0 ? `(${stagedFiles.length})` : ""}
-                </button>
+                {tab === "local" ? (
+                  <button
+                    onClick={handleUpload}
+                    disabled={stagedFiles.length === 0}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Upload className="h-4 w-4" />
+                    Upload {stagedFiles.length > 0 ? `(${stagedFiles.length})` : ""}
+                  </button>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      if (!zipFile) return;
+                      setUploadState("uploading");
+                      setErrorMsg("");
+                      try {
+                        await uploadAndExtractZip(workspaceId, zipFile, currentPath);
+                        setUploadState("done");
+                      } catch (err) {
+                        setErrorMsg(err instanceof Error ? err.message : "Zip import failed");
+                        setUploadState("error");
+                      }
+                    }}
+                    disabled={!zipFile}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Archive className="h-4 w-4" />
+                    Upload & Extract
+                  </button>
+                )}
               </>
             )}
             {uploadState === "uploading" && (
@@ -773,7 +1062,17 @@ function GDriveImportBanner({
   const [status, setStatus] = useState<string | null>(null);
   const [imported, setImported] = useState(0);
   const [total, setTotal] = useState(0);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem("gdrive-import-banner-dismissed-keys");
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return new Set();
+      return new Set(parsed.filter((x) => typeof x === "string"));
+    } catch {
+      return new Set();
+    }
+  });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -805,6 +1104,12 @@ function GDriveImportBanner({
     };
   }, [workspaceId, onImportComplete]);
 
+  const dismissalKey =
+    status && (status === "completed" || status === "failed")
+      ? `gdrive-import-banner-dismissed:${workspaceId}:${status}:${imported}:${total}`
+      : null;
+  const dismissed = dismissalKey ? dismissedKeys.has(dismissalKey) : false;
+
   if (!status || dismissed) return null;
 
   if (status === "completed") {
@@ -820,7 +1125,20 @@ function GDriveImportBanner({
           </p>
         </div>
         <button
-          onClick={() => setDismissed(true)}
+          onClick={() => {
+            if (dismissalKey) {
+              setDismissedKeys((prev) => {
+                const next = new Set(prev);
+                next.add(dismissalKey);
+                try {
+                  localStorage.setItem("gdrive-import-banner-dismissed-keys", JSON.stringify(Array.from(next)));
+                } catch {
+                  // ignore storage errors
+                }
+                return next;
+              });
+            }
+          }}
           className="shrink-0 rounded-lg p-1 text-emerald-400 hover:bg-emerald-100 hover:text-emerald-600"
         >
           <X className="h-4 w-4" />
@@ -842,7 +1160,20 @@ function GDriveImportBanner({
           </p>
         </div>
         <button
-          onClick={() => setDismissed(true)}
+          onClick={() => {
+            if (dismissalKey) {
+              setDismissedKeys((prev) => {
+                const next = new Set(prev);
+                next.add(dismissalKey);
+                try {
+                  localStorage.setItem("gdrive-import-banner-dismissed-keys", JSON.stringify(Array.from(next)));
+                } catch {
+                  // ignore storage errors
+                }
+                return next;
+              });
+            }
+          }}
           className="shrink-0 rounded-lg p-1 text-rose-400 hover:bg-rose-100 hover:text-rose-600"
         >
           <X className="h-4 w-4" />
@@ -898,6 +1229,7 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
   const [modifiedFilter, setModifiedFilter] = useState("ALL");
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [drawerFile, setDrawerFile] = useState<FileItem | null>(null);
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
@@ -1272,7 +1604,9 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
                           </span>
                           <span className="min-w-0">
                             <span className="block truncate text-sm font-medium text-zinc-900">{folder.name}</span>
-                            <span className="block text-xs text-zinc-500">{formatRelativeDate(folder.updated_at)}</span>
+                            <span className="block text-xs text-zinc-500">
+                              {folder.file_count ?? 0} file{(folder.file_count ?? 0) !== 1 ? "s" : ""} · {formatRelativeDate(folder.updated_at)}
+                            </span>
                           </span>
                         </span>
                         <div className="relative">
@@ -1521,10 +1855,20 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
           file={drawerFile}
           workspaceId={workspaceId}
           onClose={() => setDrawerFile(null)}
+          onPreview={(file) => setPreviewFile(file)}
           onRefresh={() => {
             fetchDocuments();
             setDrawerFile(null);
           }}
+        />
+      )}
+
+      {previewFile && (
+        <FilePreviewModal
+          key={previewFile.path}
+          file={previewFile}
+          workspaceId={workspaceId}
+          onClose={() => setPreviewFile(null)}
         />
       )}
 

@@ -296,6 +296,7 @@ function ConversationView({
           file={drawerFile}
           workspaceId={workspaceId}
           onClose={() => setDrawerFile(null)}
+          onPreview={() => {}}
           onRefresh={() => setDrawerFile(null)}
         />
       )}

@@ -47,6 +47,7 @@ export interface FolderItem {
   path: string;
   created_at: string | null;
   updated_at: string | null;
+  file_count?: number;
 }
 
 export interface FileItem {
@@ -255,6 +256,27 @@ export async function getDownloadUrl(
   return request(`/api/workspaces/${workspaceId}/files/download-url?${params}`);
 }
 
+export async function getFileTextContent(
+  workspaceId: string,
+  path: string
+): Promise<string> {
+  const params = new URLSearchParams({ path });
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  const res = await fetch(`/api/workspaces/${workspaceId}/files/content?${params}`, {
+    method: "GET",
+    headers,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`API error ${res.status}: ${body}`);
+  }
+  return res.text();
+}
+
 // ── Search / Knowledge Base API ─────────────────────────────────
 
 export interface SearchResult {
@@ -318,11 +340,60 @@ export async function browseGDriveFolder(
 export async function importGDriveFolder(
   workspaceId: string,
   folderId: string,
-  recursive: boolean = true
+  recursive: boolean = true,
+  targetPath: string = "/"
 ): Promise<{ imported_count: number; error_count: number }> {
   return request(`/api/gdrive/import/${workspaceId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ folder_id: folderId, recursive }),
+    body: JSON.stringify({ folder_id: folderId, recursive, target_path: targetPath }),
   });
+}
+
+export async function importGDriveSelection(
+  workspaceId: string,
+  options: {
+    parent_folder_id: string;
+    file_ids?: string[];
+    folder_ids?: string[];
+    target_path?: string;
+  }
+): Promise<{ imported_count: number; error_count: number }> {
+  return request(`/api/gdrive/import/${workspaceId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      parent_folder_id: options.parent_folder_id,
+      file_ids: options.file_ids ?? [],
+      folder_ids: options.folder_ids ?? [],
+      target_path: options.target_path ?? "/",
+    }),
+  });
+}
+
+export async function uploadAndExtractZip(
+  workspaceId: string,
+  zipFile: File,
+  path: string = "/",
+): Promise<{ folder_path: string; imported_count: number }> {
+  const formData = new FormData();
+  formData.append("file", zipFile);
+  formData.append("path", path);
+
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`/api/workspaces/${workspaceId}/files/import-zip`, {
+    method: "POST",
+    body: formData,
+    headers,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`API error ${res.status}: ${body}`);
+  }
+  return res.json();
 }

@@ -1,8 +1,11 @@
 import json
 import mimetypes
+import zipfile
 from datetime import timedelta
+from io import BytesIO
 from pathlib import PurePosixPath
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 import local_cache
@@ -99,12 +102,20 @@ async def list_documents(
             continue
         meta_path = f"{local_prefix}{folder_name}/{FOLDER_META}"
         folder_meta = local_cache.read_json(meta_path) or {}
+        folder_prefix = f"{local_prefix}{folder_name}/"
+        nested_files = local_cache.list_all_files(folder_prefix.rstrip("/"))
+        file_count = 0
+        for nested in nested_files:
+            rel_nested = nested[len(folder_prefix):]
+            if rel_nested and not rel_nested.startswith(".") and not PurePosixPath(rel_nested).name.startswith("."):
+                file_count += 1
         folders.append({
             "name": folder_name,
             "type": "folder",
             "path": f"{path.rstrip('/')}/{folder_name}".lstrip("/"),
             "created_at": folder_meta.get("created_at"),
             "updated_at": folder_meta.get("updated_at"),
+            "file_count": file_count,
         })
 
     files = []
@@ -264,6 +275,67 @@ async def upload_files(workspace_id: str, request: Request):
     return {"uploaded": uploaded}
 
 
+@router.post("/workspaces/{workspace_id}/files/import-zip", status_code=201)
+async def import_zip(
+    workspace_id: str,
+    file: UploadFile = File(...),
+    path: str = Form(default="/"),
+):
+    _ensure_workspace(workspace_id)
+
+    filename = file.filename or ""
+    if not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Only .zip files are supported")
+
+    try:
+        raw = await file.read()
+        archive = zipfile.ZipFile(BytesIO(raw))
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail="Invalid zip archive") from exc
+
+    base_name = PurePosixPath(filename).stem.strip() or "archive"
+    root_prefix = _resolve_local_path(workspace_id, path)
+    target_root = f"{root_prefix}{base_name}/"
+    imported_count = 0
+    now = now_iso()
+
+    for info in archive.infolist():
+        if info.is_dir():
+            continue
+
+        member = info.filename.replace("\\", "/")
+        if member.startswith("/") or member.startswith("../") or "/../" in member:
+            continue
+        if member.startswith("__MACOSX/"):
+            continue
+
+        member_path = PurePosixPath(member)
+        if not member_path.name or member_path.name.startswith("."):
+            continue
+
+        file_bytes = archive.read(info)
+        content_type = mimetypes.guess_type(member_path.name)[0] or "application/octet-stream"
+        destination = f"{target_root}{member_path.as_posix().lstrip('/')}"
+        metadata = {
+            "status": "uploaded",
+            "original_name": member_path.name,
+            "content_type": content_type,
+            "size": len(file_bytes),
+            "time_created": now,
+            "updated": now,
+            "source": "zip_upload",
+        }
+        write_file_blob(destination, file_bytes, metadata)
+        imported_count += 1
+
+    await file.close()
+    _update_workspace_counts(workspace_id)
+    return {
+        "folder_path": f"{path.rstrip('/')}/{base_name}".lstrip("/"),
+        "imported_count": imported_count,
+    }
+
+
 # ── Get file details ───────────────────────────────────────────────
 
 
@@ -294,6 +366,32 @@ async def get_file(
         "updated_at": metadata.get("updated"),
         "metadata": {k: v for k, v in metadata.items() if k not in ("content_type", "size", "time_created", "updated")},
     }
+
+
+@router.get("/workspaces/{workspace_id}/files/content")
+async def get_file_content(
+    workspace_id: str,
+    path: str = Query(..., description="File path relative to workspace root"),
+):
+    _ensure_workspace(workspace_id)
+    ws_prefix = workspace_prefix(workspace_id)
+    file_path = f"{ws_prefix}{path.lstrip('/')}"
+
+    if not blob_exists(file_path):
+        raise HTTPException(404, "File not found")
+
+    content = local_cache.read_file(file_path)
+    if content is None:
+        raise HTTPException(404, "File not found")
+
+    metadata = local_cache.read_metadata(file_path)
+    filename = PurePosixPath(path).name
+    content_type = metadata.get("content_type") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 # ── Update file metadata (status, etc.) ───────────────────────────

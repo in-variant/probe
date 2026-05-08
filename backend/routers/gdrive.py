@@ -83,8 +83,12 @@ async def browse_folders(
 
 
 class DriveImportRequest(BaseModel):
-    folder_id: str = Field(..., description="Google Drive folder ID to import from")
+    folder_id: str | None = Field(default=None, description="Google Drive folder ID to import from")
+    parent_folder_id: str | None = Field(default=None, description="Parent folder ID used to resolve selected item IDs")
+    file_ids: list[str] = Field(default_factory=list, description="Specific Drive file IDs to import")
+    folder_ids: list[str] = Field(default_factory=list, description="Specific Drive folder IDs to import recursively")
     recursive: bool = Field(default=True, description="Import subfolders recursively")
+    target_path: str = Field(default="/", description="Workspace folder path to import into")
 
 
 @router.post("/import/{workspace_id}")
@@ -97,10 +101,42 @@ async def import_from_drive(workspace_id: str, body: DriveImportRequest, request
     token_info = _get_drive_token(request)
 
     try:
-        if body.recursive:
+        drive_files: list[dict] = []
+        target_path = (body.target_path or "/").strip()
+        if not target_path:
+            target_path = "/"
+
+        if body.file_ids or body.folder_ids:
+            parent_folder_id = body.parent_folder_id or body.folder_id or "root"
+            parent_items = list_folder(token_info, parent_folder_id)
+            by_id = {item["id"]: item for item in parent_items}
+
+            for file_id in body.file_ids:
+                item = by_id.get(file_id)
+                if not item:
+                    continue
+                if item["mimeType"] == "application/vnd.google-apps.folder":
+                    continue
+                drive_files.append({**item, "path": item["name"]})
+
+            for folder_id in body.folder_ids:
+                item = by_id.get(folder_id)
+                if not item:
+                    continue
+                if item["mimeType"] != "application/vnd.google-apps.folder":
+                    continue
+                drive_files.extend(
+                    list_folder_recursive(
+                        token_info,
+                        folder_id=folder_id,
+                        prefix=f"{item['name']}/",
+                    )
+                )
+        elif body.folder_id and body.recursive:
             drive_files = list_folder_recursive(token_info, body.folder_id)
         else:
-            all_items = list_folder(token_info, body.folder_id)
+            source_folder_id = body.folder_id or "root"
+            all_items = list_folder(token_info, source_folder_id)
             drive_files = [
                 {**f, "path": f["name"]}
                 for f in all_items
@@ -122,7 +158,11 @@ async def import_from_drive(workspace_id: str, body: DriveImportRequest, request
                 continue
 
             content, ext, content_type = result
-            filename = df["path"]
+            relative_name = str(df["path"]).lstrip("/")
+            if target_path == "/":
+                filename = relative_name
+            else:
+                filename = f"{target_path.strip('/')}/{relative_name}"
             if ext and not filename.endswith(ext):
                 filename += ext
 
