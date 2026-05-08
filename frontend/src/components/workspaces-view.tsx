@@ -21,7 +21,7 @@ import {
   deleteWorkspace,
   type Workspace,
 } from "@/lib/api";
-import { GoogleDrivePicker } from "@/components/google-drive-picker";
+import { GoogleDriveFolderPicker } from "@/components/google-drive-picker";
 
 type StatusFilter = "all" | "active" | "on-hold" | "completed";
 type SortKey = "updated_at" | "name" | "created_at";
@@ -344,7 +344,6 @@ function CreateWorkspaceModal({
 
   const [driveFolderId, setDriveFolderId] = useState<string | undefined>();
   const [driveFolderName, setDriveFolderName] = useState<string | undefined>();
-  const [driveSessionToken, setDriveSessionToken] = useState<string | undefined>();
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
@@ -354,7 +353,7 @@ function CreateWorkspaceModal({
     setError("");
     setLoading(true);
     try {
-      await createWorkspace(name.trim(), status, driveFolderId, driveSessionToken);
+      await createWorkspace(name.trim(), status, driveFolderId);
       onCreated();
       onClose();
     } catch (err) {
@@ -416,18 +415,16 @@ function CreateWorkspaceModal({
               Import from Google Drive
             </label>
             <div className="mt-1.5">
-              <GoogleDrivePicker
+              <GoogleDriveFolderPicker
                 selectedFolderId={driveFolderId}
                 selectedFolderName={driveFolderName}
-                onSelect={(folderId, folderName, sessionToken) => {
+                onSelect={(folderId, folderName) => {
                   setDriveFolderId(folderId);
                   setDriveFolderName(folderName);
-                  setDriveSessionToken(sessionToken);
                 }}
                 onClear={() => {
                   setDriveFolderId(undefined);
                   setDriveFolderName(undefined);
-                  setDriveSessionToken(undefined);
                 }}
               />
             </div>

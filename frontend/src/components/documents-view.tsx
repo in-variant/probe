@@ -29,6 +29,7 @@ import {
   Loader2,
   MoreVertical,
   Music,
+  Plus,
   Presentation,
   Search,
   Sheet,
@@ -53,6 +54,7 @@ import {
   type FileItem,
   type Workspace,
 } from "@/lib/api";
+import { DriveFileBrowser } from "@/components/google-drive-picker";
 
 // ── Icon map ─────────────────────────────────────────────────────
 
@@ -415,23 +417,27 @@ export function DetailDrawer({
   );
 }
 
-// ── Upload modal ─────────────────────────────────────────────────
+// ── Add File modal (tabbed: Local Upload / Google Drive) ─────────
 
+type AddFileTab = "local" | "drive";
 type UploadState = "selecting" | "uploading" | "done" | "error";
 
-function UploadModal({
+function AddFileModal({
   workspaceId,
   currentPath,
   initialFiles = [],
+  initialTab = "local",
   onClose,
   onUploaded,
 }: {
   workspaceId: string;
   currentPath: string;
   initialFiles?: File[];
+  initialTab?: AddFileTab;
   onClose: () => void;
   onUploaded: () => void;
 }) {
+  const [tab, setTab] = useState<AddFileTab>(initialTab);
   const [stagedFiles, setStagedFiles] = useState<File[]>(initialFiles);
   const [uploadState, setUploadState] = useState<UploadState>("selecting");
   const [progress, setProgress] = useState(0);
@@ -497,11 +503,34 @@ function UploadModal({
 
   const totalSize = stagedFiles.reduce((sum, f) => sum + f.size, 0);
 
+  const TAB_ITEMS: { key: AddFileTab; label: string; icon: React.ReactNode }[] = [
+    {
+      key: "local",
+      label: "Local Upload",
+      icon: <Upload className="h-3.5 w-3.5" />,
+    },
+    {
+      key: "drive",
+      label: "Google Drive",
+      icon: (
+        <svg width="14" height="14" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
+          <path d="m6.6 66.85 3.85 6.65c.8 1.45 1.95 2.65 3.3 3.55l13.75-23.8H.25c0 1.55.4 3.1 1.2 4.5z" fill="#0066DA"/>
+          <path d="m43.65 25-13.75-23.8c-1.35.9-2.5 2.1-3.3 3.55L1.2 53.25H28.7z" fill="#00AC47"/>
+          <path d="m73.55 76.8c1.35-.9 2.5-2.1 3.3-3.55l1.6-2.75 7.65-13.25c.8-1.45 1.2-3.1 1.2-4.5H59.8l5.85 13.25z" fill="#EA4335"/>
+          <path d="m43.65 25 13.75-23.8c-1.35-.9-2.9-1.2-4.5-1.2H34.4c-1.6 0-3.15.45-4.5 1.2z" fill="#00832D"/>
+          <path d="M59.8 53.25H27.5l-13.75 23.8c1.35.9 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684FC"/>
+          <path d="M73.4 26.5 60.65 4.75c-.8-1.45-1.95-2.65-3.3-3.55L43.6 25l16.2 28.25H87.3c0-1.55-.4-3.1-1.2-4.5z" fill="#FFBA00"/>
+        </svg>
+      ),
+    },
+  ];
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 backdrop-blur-sm animate-fade-in sm:items-center">
       <div className="w-full max-w-lg rounded-t-2xl border border-zinc-200 bg-white shadow-xl animate-slide-down sm:rounded-2xl">
+        {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-4 sm:px-6">
-          <h2 className="text-lg font-semibold tracking-[-0.02em] text-zinc-900">Upload Files</h2>
+          <h2 className="text-lg font-semibold tracking-[-0.02em] text-zinc-900">Add Files</h2>
           <button
             onClick={handleCancel}
             className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 transition-colors"
@@ -510,8 +539,30 @@ function UploadModal({
           </button>
         </div>
 
+        {/* Tabs */}
+        {uploadState === "selecting" && (
+          <div className="flex border-b border-zinc-200 px-4 sm:px-6">
+            {TAB_ITEMS.map(({ key, label, icon }) => (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={cn(
+                  "flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors",
+                  tab === key
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-zinc-500 hover:text-zinc-700"
+                )}
+              >
+                {icon}
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Body */}
         <div className="px-4 py-5 sm:px-6">
-          {uploadState === "selecting" && (
+          {uploadState === "selecting" && tab === "local" && (
             <>
               <div
                 onDragEnter={(e) => { e.preventDefault(); dragCounterRef.current++; setIsDragOver(true); }}
@@ -564,6 +615,18 @@ function UploadModal({
             </>
           )}
 
+          {uploadState === "selecting" && tab === "drive" && (
+            <div className="overflow-hidden rounded-xl border border-zinc-200">
+              <DriveFileBrowser
+                workspaceId={workspaceId}
+                onImportComplete={() => {
+                  onUploaded();
+                  onClose();
+                }}
+              />
+            </div>
+          )}
+
           {uploadState === "uploading" && (
             <div className="py-6">
               <div className="flex flex-col items-center">
@@ -604,33 +667,36 @@ function UploadModal({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-zinc-100 px-4 py-4 sm:px-6">
-          {uploadState === "selecting" && (
-            <>
+        {/* Footer (only for local upload tab) */}
+        {(uploadState !== "selecting" || tab === "local") && (
+          <div className="flex items-center justify-end gap-2 border-t border-zinc-100 px-4 py-4 sm:px-6">
+            {uploadState === "selecting" && (
+              <>
+                <button onClick={handleCancel} className="rounded-full px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 transition-colors">Cancel</button>
+                <button
+                  onClick={handleUpload}
+                  disabled={stagedFiles.length === 0}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Upload className="h-4 w-4" />
+                  Upload {stagedFiles.length > 0 ? `(${stagedFiles.length})` : ""}
+                </button>
+              </>
+            )}
+            {uploadState === "uploading" && (
               <button onClick={handleCancel} className="rounded-full px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 transition-colors">Cancel</button>
-              <button
-                onClick={handleUpload}
-                disabled={stagedFiles.length === 0}
-                className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Upload className="h-4 w-4" />
-                Upload {stagedFiles.length > 0 ? `(${stagedFiles.length})` : ""}
-              </button>
-            </>
-          )}
-          {uploadState === "uploading" && (
-            <button onClick={handleCancel} className="rounded-full px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 transition-colors">Cancel</button>
-          )}
-          {uploadState === "done" && (
-            <button onClick={handleFinish} className="rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700">Done</button>
-          )}
-          {uploadState === "error" && (
-            <>
-              <button onClick={handleCancel} className="rounded-full px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 transition-colors">Close</button>
-              <button onClick={() => { setUploadState("selecting"); setProgress(0); setErrorMsg(""); }} className="rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700">Try Again</button>
-            </>
-          )}
-        </div>
+            )}
+            {uploadState === "done" && (
+              <button onClick={handleFinish} className="rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700">Done</button>
+            )}
+            {uploadState === "error" && (
+              <>
+                <button onClick={handleCancel} className="rounded-full px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 transition-colors">Close</button>
+                <button onClick={() => { setUploadState("selecting"); setProgress(0); setErrorMsg(""); }} className="rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700">Try Again</button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1126,10 +1192,10 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
                 type="button"
                 onClick={() => openUploadModal()}
                 className="inline-flex shrink-0 items-center gap-2 rounded-full bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white shadow-sm transition cursor-pointer hover:bg-blue-700 active:bg-blue-800"
-                title="Upload files"
+                title="Add files"
               >
-                <Upload className="h-4 w-4" />
-                <span className="hidden sm:inline">Upload</span>
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">Add File</span>
               </button>
             </div>
           </div>
@@ -1470,12 +1536,13 @@ export function DocumentsView({ workspaceId }: { workspaceId: string }) {
         />
       )}
 
-      {/* Upload modal */}
+      {/* Add file modal */}
       {showUploadModal && (
-        <UploadModal
+        <AddFileModal
           workspaceId={workspaceId}
           currentPath={currentPath}
           initialFiles={droppedFiles}
+          initialTab={droppedFiles.length > 0 ? "local" : "local"}
           onClose={() => {
             setShowUploadModal(false);
             setDroppedFiles([]);

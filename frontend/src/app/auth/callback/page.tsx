@@ -11,10 +11,8 @@ function CallbackHandler() {
 
   useEffect(() => {
     if (code) {
-      localStorage.setItem("gdrive_auth_code", code);
       localStorage.setItem("auth_callback_code", code);
     } else if (error) {
-      localStorage.setItem("gdrive_auth_error", error);
       localStorage.setItem("auth_callback_error", error);
     }
     window.close();
@@ -29,12 +27,12 @@ function CallbackHandler() {
   );
 }
 
-export default function GDriveCallbackPage() {
+export default function AuthCallbackPage() {
   return (
     <Suspense
       fallback={
         <div className="flex min-h-screen items-center justify-center">
-          <p className="text-sm text-zinc-500">Connecting to Google Drive…</p>
+          <p className="text-sm text-zinc-500">Signing in…</p>
         </div>
       }
     >

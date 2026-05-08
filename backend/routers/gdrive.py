@@ -1,9 +1,10 @@
 """
 Google Drive integration router.
 
+All endpoints use the authenticated user's Google credentials (from the auth
+session) for Drive access. No separate Drive OAuth flow is needed.
+
 Endpoints:
-  GET  /api/gdrive/auth-url           → returns the OAuth consent URL
-  POST /api/gdrive/callback           → exchanges auth code for tokens
   GET  /api/gdrive/folders             → list folders in user's Drive
   POST /api/gdrive/import/{workspace}  → pull files from a Drive folder into a workspace
 """
@@ -11,7 +12,7 @@ Endpoints:
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 import local_cache
@@ -24,68 +25,24 @@ from storage import (
     now_iso,
 )
 from gdrive_client import (
-    get_oauth_url,
-    exchange_code,
     list_folder,
     download_file,
     list_folder_recursive,
-    EXPORT_MIME_MAP,
 )
+from routers.auth import get_current_user, get_drive_token_from_session
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/gdrive", tags=["google-drive"])
 
-# In-memory token store keyed by a simple session token.
-# In production this should be replaced with a proper session/DB store.
+# Keep legacy token store for backward compatibility with background tasks
 _token_store: dict[str, dict[str, Any]] = {}
 
 
-# ── OAuth flow ────────────────────────────────────────────────────
-
-
-@router.get("/auth-url")
-async def auth_url(
-    origin: str = Query(..., description="Frontend origin, e.g. https://akashalabdhi.invariant-ai.com"),
-    state: str = Query(default=""),
-):
-    """Return the Google OAuth 2.0 consent URL."""
-    try:
-        url, flow_id = get_oauth_url(origin=origin, state=state)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    return {"url": url, "flow_id": flow_id}
-
-
-class OAuthCallback(BaseModel):
-    code: str
-    origin: str
-    flow_id: str
-
-
-@router.post("/callback")
-async def oauth_callback(body: OAuthCallback):
-    """Exchange the authorization code for tokens."""
-    try:
-        token_info = exchange_code(body.code, origin=body.origin, flow_id=body.flow_id)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except Exception as exc:
-        logger.error("OAuth token exchange failed: %s", exc)
-        raise HTTPException(400, "Failed to exchange authorization code") from exc
-
-    import secrets
-    session_token = secrets.token_urlsafe(32)
-    _token_store[session_token] = token_info
-
-    return {"session_token": session_token}
-
-
-def _get_token(session_token: str) -> dict[str, Any]:
-    token = _token_store.get(session_token)
-    if not token:
-        raise HTTPException(401, "Google Drive not connected. Please authenticate first.")
-    return token
+def _get_drive_token(request: Request) -> dict[str, Any]:
+    """Get Drive token from the authenticated user's session."""
+    session = get_current_user(request)
+    return get_drive_token_from_session(session)
 
 
 # ── Browse Drive ──────────────────────────────────────────────────
@@ -93,11 +50,11 @@ def _get_token(session_token: str) -> dict[str, Any]:
 
 @router.get("/folders")
 async def browse_folders(
-    session_token: str = Query(...),
+    request: Request,
     folder_id: str = Query(default="root"),
 ):
     """List folders and files inside a Google Drive folder."""
-    token_info = _get_token(session_token)
+    token_info = _get_drive_token(request)
     try:
         items = list_folder(token_info, folder_id)
     except Exception as exc:
@@ -126,19 +83,18 @@ async def browse_folders(
 
 
 class DriveImportRequest(BaseModel):
-    session_token: str
     folder_id: str = Field(..., description="Google Drive folder ID to import from")
     recursive: bool = Field(default=True, description="Import subfolders recursively")
 
 
 @router.post("/import/{workspace_id}")
-async def import_from_drive(workspace_id: str, body: DriveImportRequest):
+async def import_from_drive(workspace_id: str, body: DriveImportRequest, request: Request):
     """Download all files from a Drive folder into a workspace."""
     meta = read_json_blob(workspace_meta_path(workspace_id))
     if not meta:
         raise HTTPException(404, "Workspace not found")
 
-    token_info = _get_token(body.session_token)
+    token_info = _get_drive_token(request)
 
     try:
         if body.recursive:

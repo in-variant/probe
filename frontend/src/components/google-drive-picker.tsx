@@ -1,15 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ChevronRight,
   Folder,
   FileText,
   Check,
   Loader2,
-  Unlink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  browseGDriveFolder,
+  type GDriveFolder,
+  type GDriveFile,
+} from "@/lib/api";
 
 function DriveLogo({ size = 16 }: { size?: number }) {
   return (
@@ -23,35 +27,29 @@ function DriveLogo({ size = 16 }: { size?: number }) {
     </svg>
   );
 }
-import {
-  getGDriveAuthUrl,
-  exchangeGDriveCode,
-  browseGDriveFolder,
-  type GDriveFolder,
-  type GDriveFile,
-} from "@/lib/api";
 
-interface GoogleDrivePickerProps {
-  onSelect: (folderId: string, folderName: string, sessionToken: string) => void;
-  onClear: () => void;
-  selectedFolderId?: string;
-  selectedFolderName?: string;
-}
+export { DriveLogo };
 
 interface BreadcrumbItem {
   id: string;
   name: string;
 }
 
-export function GoogleDrivePicker({
+/* ── Folder picker (for workspace create modal) ───────────────── */
+
+interface GoogleDriveFolderPickerProps {
+  onSelect: (folderId: string, folderName: string) => void;
+  onClear: () => void;
+  selectedFolderId?: string;
+  selectedFolderName?: string;
+}
+
+export function GoogleDriveFolderPicker({
   onSelect,
   onClear,
   selectedFolderId,
   selectedFolderName,
-}: GoogleDrivePickerProps) {
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
-  const [connecting, setConnecting] = useState(false);
-  const [browsing, setBrowsing] = useState(false);
+}: GoogleDriveFolderPickerProps) {
   const [showBrowser, setShowBrowser] = useState(false);
   const [loading, setLoading] = useState(false);
   const [folders, setFolders] = useState<GDriveFolder[]>([]);
@@ -59,117 +57,26 @@ export function GoogleDrivePicker({
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([
     { id: "root", name: "My Drive" },
   ]);
-  const popupRef = useRef<Window | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const flowIdRef = useRef<string>("");
 
   const currentFolderId = breadcrumbs[breadcrumbs.length - 1]?.id ?? "root";
 
-  const loadFolder = useCallback(
-    async (folderId: string) => {
-      if (!sessionToken) return;
-      setLoading(true);
-      try {
-        const data = await browseGDriveFolder(sessionToken, folderId);
-        setFolders(data.folders);
-        setFiles(data.files);
-      } catch {
-        setFolders([]);
-        setFiles([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [sessionToken]
-  );
-
-  useEffect(() => {
-    if (showBrowser && sessionToken) {
-      loadFolder(currentFolderId);
+  const loadFolder = useCallback(async (folderId: string) => {
+    setLoading(true);
+    try {
+      const data = await browseGDriveFolder(folderId);
+      setFolders(data.folders);
+      setFiles(data.files);
+    } catch {
+      setFolders([]);
+      setFiles([]);
+    } finally {
+      setLoading(false);
     }
-  }, [showBrowser, sessionToken, currentFolderId, loadFolder]);
-
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
   }, []);
 
-  async function handleConnect() {
-    setConnecting(true);
-    localStorage.removeItem("gdrive_auth_code");
-    localStorage.removeItem("gdrive_auth_error");
-    try {
-      const { url, flow_id } = await getGDriveAuthUrl("connect");
-      flowIdRef.current = flow_id;
-      const popup = window.open(url, "gdrive-auth", "width=520,height=680,popup=1");
-      popupRef.current = popup;
-
-      pollRef.current = setInterval(() => {
-        const code = localStorage.getItem("gdrive_auth_code");
-        const error = localStorage.getItem("gdrive_auth_error");
-
-        if (code) {
-          localStorage.removeItem("gdrive_auth_code");
-          if (pollRef.current) clearInterval(pollRef.current);
-          if (popup && !popup.closed) popup.close();
-          handleCodeExchange(code);
-          return;
-        }
-
-        if (error) {
-          localStorage.removeItem("gdrive_auth_error");
-          if (pollRef.current) clearInterval(pollRef.current);
-          if (popup && !popup.closed) popup.close();
-          setConnecting(false);
-          return;
-        }
-
-        if (!popup || popup.closed) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          setConnecting(false);
-        }
-      }, 500);
-    } catch {
-      setConnecting(false);
-    }
-  }
-
-  async function handleCodeExchange(code: string) {
-    try {
-      const { session_token } = await exchangeGDriveCode(code, flowIdRef.current);
-      setSessionToken(session_token);
-      setShowBrowser(true);
-    } catch {
-      // exchange failed
-    } finally {
-      setConnecting(false);
-    }
-  }
-
-  function navigateInto(folder: GDriveFolder) {
-    setBreadcrumbs((prev) => [...prev, { id: folder.id, name: folder.name }]);
-  }
-
-  function navigateTo(index: number) {
-    setBreadcrumbs((prev) => prev.slice(0, index + 1));
-  }
-
-  function handleSelectFolder() {
-    if (!sessionToken) return;
-    const current = breadcrumbs[breadcrumbs.length - 1];
-    onSelect(current.id, current.name, sessionToken);
-    setShowBrowser(false);
-  }
-
-  function handleDisconnect() {
-    setSessionToken(null);
-    setShowBrowser(false);
-    setFolders([]);
-    setFiles([]);
-    setBreadcrumbs([{ id: "root", name: "My Drive" }]);
-    onClear();
-  }
+  useEffect(() => {
+    if (showBrowser) loadFolder(currentFolderId);
+  }, [showBrowser, currentFolderId, loadFolder]);
 
   if (selectedFolderId && selectedFolderName) {
     return (
@@ -183,23 +90,18 @@ export function GoogleDrivePicker({
         </div>
         <button
           type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            onClear();
-          }}
-          className="rounded-lg p-1.5 text-emerald-500 transition-colors hover:bg-emerald-100 hover:text-emerald-700"
-          title="Remove Google Drive link"
+          onClick={(e) => { e.preventDefault(); onClear(); }}
+          className="rounded-lg px-2 py-1 text-xs text-emerald-500 transition-colors hover:bg-emerald-100 hover:text-emerald-700"
         >
-          <Unlink className="h-4 w-4" />
+          Change
         </button>
       </div>
     );
   }
 
-  if (showBrowser && sessionToken) {
+  if (showBrowser) {
     return (
       <div className="overflow-hidden rounded-lg border border-zinc-200">
-        {/* Header with breadcrumbs */}
         <div className="flex items-center gap-1 border-b border-zinc-200 bg-zinc-50 px-3 py-2">
           <DriveLogo size={14} />
           <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-xs">
@@ -208,10 +110,7 @@ export function GoogleDrivePicker({
                 {i > 0 && <ChevronRight className="h-3 w-3 text-zinc-300" />}
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigateTo(i);
-                  }}
+                  onClick={(e) => { e.preventDefault(); setBreadcrumbs((p) => p.slice(0, i + 1)); }}
                   className={cn(
                     "rounded px-1 py-0.5 transition-colors",
                     i === breadcrumbs.length - 1
@@ -226,26 +125,20 @@ export function GoogleDrivePicker({
           </div>
           <button
             type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              handleDisconnect();
-            }}
+            onClick={(e) => { e.preventDefault(); setShowBrowser(false); }}
             className="ml-2 shrink-0 rounded px-2 py-0.5 text-xs text-zinc-400 transition-colors hover:bg-zinc-200 hover:text-zinc-600"
           >
-            Disconnect
+            Cancel
           </button>
         </div>
 
-        {/* Folder listing */}
         <div className="max-h-52 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-5 w-5 animate-spin text-zinc-400" />
             </div>
           ) : folders.length === 0 && files.length === 0 ? (
-            <div className="py-6 text-center text-xs text-zinc-400">
-              This folder is empty
-            </div>
+            <div className="py-6 text-center text-xs text-zinc-400">This folder is empty</div>
           ) : (
             <div>
               {folders.map((folder) => (
@@ -254,7 +147,7 @@ export function GoogleDrivePicker({
                   type="button"
                   onClick={(e) => {
                     e.preventDefault();
-                    navigateInto(folder);
+                    setBreadcrumbs((p) => [...p, { id: folder.id, name: folder.name }]);
                   }}
                   className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-zinc-50"
                 >
@@ -264,10 +157,7 @@ export function GoogleDrivePicker({
                 </button>
               ))}
               {files.map((file) => (
-                <div
-                  key={file.id}
-                  className="flex items-center gap-2.5 px-3 py-2 text-sm opacity-50"
-                >
+                <div key={file.id} className="flex items-center gap-2.5 px-3 py-2 text-sm opacity-50">
                   <FileText className="h-4 w-4 shrink-0 text-zinc-400" />
                   <span className="min-w-0 flex-1 truncate text-zinc-500">{file.name}</span>
                 </div>
@@ -276,17 +166,17 @@ export function GoogleDrivePicker({
           )}
         </div>
 
-        {/* Footer */}
         <div className="flex items-center justify-between border-t border-zinc-200 bg-zinc-50 px-3 py-2">
           <p className="text-xs text-zinc-400">
-            {folders.length} folder{folders.length !== 1 ? "s" : ""}, {files.length} file
-            {files.length !== 1 ? "s" : ""}
+            {folders.length} folder{folders.length !== 1 ? "s" : ""}, {files.length} file{files.length !== 1 ? "s" : ""}
           </p>
           <button
             type="button"
             onClick={(e) => {
               e.preventDefault();
-              handleSelectFolder();
+              const current = breadcrumbs[breadcrumbs.length - 1];
+              onSelect(current.id, current.name);
+              setShowBrowser(false);
             }}
             className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700"
           >
@@ -301,31 +191,159 @@ export function GoogleDrivePicker({
   return (
     <button
       type="button"
-      onClick={(e) => {
-        e.preventDefault();
-        handleConnect();
-      }}
-      disabled={connecting}
-      className={cn(
-        "flex w-full items-center gap-3 rounded-lg border border-dashed border-zinc-300 px-3 py-3 text-left transition-colors",
-        connecting
-          ? "cursor-wait bg-zinc-50"
-          : "cursor-pointer hover:border-blue-300 hover:bg-blue-50/50"
-      )}
+      onClick={(e) => { e.preventDefault(); setShowBrowser(true); }}
+      className="flex w-full items-center gap-3 rounded-lg border border-dashed border-zinc-300 px-3 py-3 text-left transition-colors cursor-pointer hover:border-blue-300 hover:bg-blue-50/50"
     >
       <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white">
-        {connecting ? (
-          <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
-        ) : (
-          <DriveLogo size={20} />
-        )}
+        <DriveLogo size={20} />
       </div>
       <div className="min-w-0">
-        <p className="text-sm font-medium text-zinc-700">
-          {connecting ? "Connecting to Google Drive…" : "Connect Google Drive"}
-        </p>
+        <p className="text-sm font-medium text-zinc-700">Select Google Drive Folder</p>
         <p className="text-xs text-zinc-400">Import files from a Drive folder</p>
       </div>
     </button>
+  );
+}
+
+/* ── Drive file browser (for importing into existing workspace) ── */
+
+interface DriveFileBrowserProps {
+  workspaceId: string;
+  onImportComplete: () => void;
+}
+
+export function DriveFileBrowser({
+  workspaceId,
+  onImportComplete,
+}: DriveFileBrowserProps) {
+  const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [folders, setFolders] = useState<GDriveFolder[]>([]);
+  const [files, setFiles] = useState<GDriveFile[]>([]);
+  const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([
+    { id: "root", name: "My Drive" },
+  ]);
+
+  const currentFolderId = breadcrumbs[breadcrumbs.length - 1]?.id ?? "root";
+
+  const loadFolder = useCallback(async (folderId: string) => {
+    setLoading(true);
+    try {
+      const data = await browseGDriveFolder(folderId);
+      setFolders(data.folders);
+      setFiles(data.files);
+    } catch {
+      setFolders([]);
+      setFiles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFolder(currentFolderId);
+  }, [currentFolderId, loadFolder]);
+
+  async function handleImport() {
+    setImporting(true);
+    try {
+      const { importGDriveFolder } = await import("@/lib/api");
+      await importGDriveFolder(workspaceId, currentFolderId, true);
+      onImportComplete();
+    } catch {
+      // error handled by caller
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col">
+      {/* Breadcrumbs */}
+      <div className="flex items-center gap-1 border-b border-zinc-200 bg-zinc-50 px-3 py-2 rounded-t-xl">
+        <DriveLogo size={14} />
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-xs">
+          {breadcrumbs.map((crumb, i) => (
+            <span key={crumb.id} className="flex shrink-0 items-center gap-0.5">
+              {i > 0 && <ChevronRight className="h-3 w-3 text-zinc-300" />}
+              <button
+                type="button"
+                onClick={() => setBreadcrumbs((p) => p.slice(0, i + 1))}
+                className={cn(
+                  "rounded px-1 py-0.5 transition-colors",
+                  i === breadcrumbs.length - 1
+                    ? "font-medium text-zinc-800"
+                    : "text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700"
+                )}
+              >
+                {crumb.name}
+              </button>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="max-h-64 min-h-[12rem] overflow-y-auto">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-5 w-5 animate-spin text-zinc-400" />
+          </div>
+        ) : folders.length === 0 && files.length === 0 ? (
+          <div className="py-10 text-center text-xs text-zinc-400">This folder is empty</div>
+        ) : (
+          <div>
+            {folders.map((folder) => (
+              <button
+                key={folder.id}
+                type="button"
+                onClick={() =>
+                  setBreadcrumbs((p) => [...p, { id: folder.id, name: folder.name }])
+                }
+                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-zinc-50"
+              >
+                <Folder className="h-4 w-4 shrink-0 text-blue-500" />
+                <span className="min-w-0 flex-1 truncate text-zinc-700">{folder.name}</span>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-300" />
+              </button>
+            ))}
+            {files.map((file) => (
+              <div
+                key={file.id}
+                className="flex items-center gap-2.5 px-3 py-2.5 text-sm opacity-50"
+              >
+                <FileText className="h-4 w-4 shrink-0 text-zinc-400" />
+                <span className="min-w-0 flex-1 truncate text-zinc-500">{file.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between border-t border-zinc-200 bg-zinc-50 px-3 py-3 rounded-b-xl">
+        <p className="text-xs text-zinc-400">
+          {folders.length} folder{folders.length !== 1 ? "s" : ""}, {files.length} file{files.length !== 1 ? "s" : ""}
+        </p>
+        <button
+          type="button"
+          onClick={handleImport}
+          disabled={importing}
+          className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+        >
+          {importing ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Importing…
+            </>
+          ) : (
+            <>
+              <Check className="h-3 w-3" />
+              Import from this folder
+            </>
+          )}
+        </button>
+      </div>
+    </div>
   );
 }

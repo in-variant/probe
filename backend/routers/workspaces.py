@@ -1,6 +1,6 @@
 import logging
 import re
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 
 import local_cache
@@ -11,7 +11,6 @@ from storage import (
     write_json_blob,
     write_file_blob,
     delete_prefix,
-    rename_prefix,
     now_iso,
     WORKSPACE_ROOT,
 )
@@ -25,7 +24,6 @@ class WorkspaceCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     status: str = Field(default="active")
     google_drive_folder_id: str | None = Field(default=None, description="Google Drive folder ID to import files from")
-    gdrive_session_token: str | None = Field(default=None, description="Session token for Google Drive access")
 
 
 class WorkspaceUpdate(BaseModel):
@@ -99,17 +97,9 @@ def _recount_workspace(workspace_id: str):
     write_json_blob(workspace_meta_path(workspace_id), ws_meta)
 
 
-def _import_drive_folder(workspace_id: str, folder_id: str, session_token: str):
+def _import_drive_folder(workspace_id: str, folder_id: str, token_info: dict):
     """Background task: import files from a Google Drive folder into a workspace."""
     from gdrive_client import list_folder_recursive, download_file
-
-    from routers.gdrive import _token_store
-
-    token_info = _token_store.get(session_token)
-    if not token_info:
-        logger.error("GDrive import: session token not found for workspace %s", workspace_id)
-        _update_import_status(workspace_id, "failed")
-        return
 
     try:
         drive_files = list_folder_recursive(token_info, folder_id)
@@ -159,7 +149,7 @@ def _import_drive_folder(workspace_id: str, folder_id: str, session_token: str):
 
 
 @router.post("/workspaces", status_code=201)
-async def create_workspace(body: WorkspaceCreate, background_tasks: BackgroundTasks):
+async def create_workspace(body: WorkspaceCreate, background_tasks: BackgroundTasks, request: Request):
     if body.name.strip().lower() in _existing_workspace_names():
         raise HTTPException(409, "A workspace with this name already exists")
 
@@ -195,13 +185,20 @@ async def create_workspace(body: WorkspaceCreate, background_tasks: BackgroundTa
 
     write_json_blob(workspace_meta_path(final_slug), meta)
 
-    if body.google_drive_folder_id and body.gdrive_session_token:
-        background_tasks.add_task(
-            _import_drive_folder,
-            final_slug,
-            body.google_drive_folder_id,
-            body.gdrive_session_token,
-        )
+    if body.google_drive_folder_id:
+        from routers.auth import get_current_user, get_drive_token_from_session
+        try:
+            session = get_current_user(request)
+            token_info = get_drive_token_from_session(session)
+            background_tasks.add_task(
+                _import_drive_folder,
+                final_slug,
+                body.google_drive_folder_id,
+                token_info,
+            )
+        except Exception:
+            logger.warning("Could not get Drive token for background import")
+            _update_import_status(final_slug, "failed")
 
     return meta
 

@@ -7,10 +7,12 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
-from routers import workspaces, documents, search, gdrive
+from routers import workspaces, documents, search, gdrive, auth
 from sync import sync_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
@@ -38,6 +40,28 @@ _default_origins = [
 _extra = os.getenv("CORS_ORIGINS", "")
 cors_origins = _default_origins + [o.strip() for o in _extra.split(",") if o.strip()]
 
+PUBLIC_PATHS = {"/api/health", "/api/auth/login", "/api/auth/callback"}
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        path = request.url.path
+        if path in PUBLIC_PATHS:
+            return await call_next(request)
+        if not path.startswith("/api/"):
+            return await call_next(request)
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+        token = auth_header[7:]
+        if token not in auth.AUTH_SESSION_STORE:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired session"})
+        return await call_next(request)
+
+
+app.add_middleware(AuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -46,6 +70,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api")
 app.include_router(workspaces.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
