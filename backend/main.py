@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from routers import workspaces, documents, search, gdrive, auth
+from routers import workspaces, documents, search, gdrive, auth, document_requests, compliance_roadmap, admin_rag
 from sync import sync_engine
 from rag.jobs import bootstrap_all_workspaces, start_index_queue, stop_index_queue
 
@@ -83,6 +83,9 @@ app.include_router(workspaces.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(gdrive.router, prefix="/api")
+app.include_router(document_requests.router, prefix="/api")
+app.include_router(compliance_roadmap.router, prefix="/api")
+app.include_router(admin_rag.router, prefix="/api")
 
 
 @app.get("/api/health")

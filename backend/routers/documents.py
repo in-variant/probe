@@ -1,15 +1,20 @@
 import json
 import mimetypes
+import uuid
 import zipfile
 from datetime import timedelta
 from io import BytesIO
+from typing import Any
 from pathlib import PurePosixPath
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 import local_cache
+from rag.chroma_store import get_store
+from rag.indexer import is_indexable_path, path_has_forbidden_dot_folder
 from rag.jobs import enqueue_delete, enqueue_index
+from routers.auth import get_current_user
 from storage import (
     get_bucket,
     workspace_prefix,
@@ -30,6 +35,91 @@ router = APIRouter(tags=["documents"])
 FOLDER_META = ".folder-meta.json"
 
 
+class CommentThreadEntry(BaseModel):
+    id: str
+    body: str
+    created_by: dict[str, str]
+    created_at: str
+
+
+class DocumentComment(BaseModel):
+    id: str
+    file_path: str
+    anchor_text: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+    status: str = "open"
+    created_by: dict[str, str]
+    created_at: str
+    resolved_by: dict[str, str] | None = None
+    resolved_at: str | None = None
+    thread: list[CommentThreadEntry]
+
+
+class CommentCreate(BaseModel):
+    body: str = Field(..., min_length=1, max_length=5000)
+    anchor_text: str | None = Field(default=None, max_length=1000)
+    start_line: int | None = Field(default=None, ge=1)
+    end_line: int | None = Field(default=None, ge=1)
+
+
+class CommentReplyCreate(BaseModel):
+    body: str = Field(..., min_length=1, max_length=5000)
+
+
+class CommentPatch(BaseModel):
+    status: str = Field(..., pattern="^(open|resolved)$")
+
+
+@router.get("/workspaces/{workspace_id}/knowledge-base/status")
+async def knowledge_base_status(workspace_id: str):
+    _ensure_workspace(workspace_id)
+    from rag.jobs import index_queue
+    from sync import sync_engine
+
+    prefix = workspace_prefix(workspace_id)
+    all_files = [
+        f[len(prefix):].lstrip("/")
+        for f in local_cache.list_all_files(prefix.rstrip("/"))
+        if f.startswith(prefix)
+    ]
+    visible_files = [
+        p for p in all_files
+        if p
+        and not p.startswith(".")
+        and not PurePosixPath(p).name.startswith(".")
+        and not path_has_forbidden_dot_folder(p)
+    ]
+    indexable_files = [p for p in visible_files if is_indexable_path(p)]
+    queue_status = index_queue.status(workspace_id)
+    try:
+        indexed_chunk_count = get_store().chunk_count(workspace_id)
+    except Exception:
+        indexed_chunk_count = 0
+    state = "indexing" if queue_status["pending_count"] or queue_status["running_count"] else "ready"
+    if queue_status.get("last_error"):
+        state = "error"
+    return {
+        "workspace_id": workspace_id,
+        "sync": {
+            "hydrated": bool(getattr(sync_engine, "is_hydrated", False)),
+            "state": "ready" if getattr(sync_engine, "is_hydrated", False) else "hydrating",
+        },
+        "knowledge_base": {
+            "state": state,
+            "file_count": len(visible_files),
+            "indexable_file_count": len(indexable_files),
+            "indexed_chunk_count": indexed_chunk_count,
+            "queue_depth": queue_status["queue_depth"],
+            "pending_count": queue_status["pending_count"],
+            "running_count": queue_status["running_count"],
+            "processed_count": queue_status["processed_count"],
+            "failed_count": queue_status["failed_count"],
+            "last_error": queue_status.get("last_error"),
+        },
+    }
+
+
 def _resolve_local_path(workspace_id: str, relative_path: str) -> str:
     """Build the local prefix for a folder inside a workspace."""
     base = workspace_prefix(workspace_id)
@@ -45,6 +135,49 @@ def _file_local_path(workspace_id: str, relative_path: str, filename: str) -> st
         clean = relative_path.strip("/")
         return f"{base}{clean}/{filename}"
     return f"{base}{filename}"
+
+
+def _clean_file_path(path: str) -> str:
+    clean = path.strip().lstrip("/")
+    if not clean or clean.endswith("/") or ".." in PurePosixPath(clean).parts:
+        raise HTTPException(status_code=422, detail="A valid file path is required")
+    return clean
+
+
+def _comment_sidecar_path(workspace_id: str, file_path: str) -> str:
+    return f"{workspace_prefix(workspace_id)}.comments/{_clean_file_path(file_path)}.json"
+
+
+def _ensure_workspace_file(workspace_id: str, file_path: str) -> str:
+    clean_path = _clean_file_path(file_path)
+    local_path = f"{workspace_prefix(workspace_id)}{clean_path}"
+    if not blob_exists(local_path):
+        raise HTTPException(404, "File not found")
+    return clean_path
+
+
+def _comment_author(request: Request) -> dict[str, str]:
+    session = get_current_user(request)
+    email = str(session.get("email") or "")
+    name = str(session.get("name") or email or "Unknown user")
+    return {"email": email, "name": name}
+
+
+def _read_comments(workspace_id: str, file_path: str) -> list[dict[str, Any]]:
+    data = read_json_blob(_comment_sidecar_path(workspace_id, file_path)) or {}
+    comments = data.get("comments", [])
+    return comments if isinstance(comments, list) else []
+
+
+def _write_comments(workspace_id: str, file_path: str, comments: list[dict[str, Any]]) -> None:
+    write_json_blob(
+        _comment_sidecar_path(workspace_id, file_path),
+        {
+            "file_path": file_path,
+            "updated_at": now_iso(),
+            "comments": comments,
+        },
+    )
 
 
 def _ensure_workspace(workspace_id: str):
@@ -409,6 +542,111 @@ async def get_file_content(
         media_type=content_type,
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
+
+
+# ── Document comments ──────────────────────────────────────────────
+
+
+@router.get("/workspaces/{workspace_id}/files/comments")
+async def list_file_comments(
+    workspace_id: str,
+    path: str = Query(..., description="File path relative to workspace root"),
+):
+    _ensure_workspace(workspace_id)
+    clean_path = _ensure_workspace_file(workspace_id, path)
+    return {"file_path": clean_path, "comments": _read_comments(workspace_id, clean_path)}
+
+
+@router.post("/workspaces/{workspace_id}/files/comments", status_code=201)
+async def create_file_comment(
+    workspace_id: str,
+    body: CommentCreate,
+    request: Request,
+    path: str = Query(..., description="File path relative to workspace root"),
+):
+    _ensure_workspace(workspace_id)
+    clean_path = _ensure_workspace_file(workspace_id, path)
+    author = _comment_author(request)
+    ts = now_iso()
+    first_entry = {
+        "id": str(uuid.uuid4()),
+        "body": body.body,
+        "created_by": author,
+        "created_at": ts,
+    }
+    comment = {
+        "id": str(uuid.uuid4()),
+        "file_path": clean_path,
+        "anchor_text": body.anchor_text,
+        "start_line": body.start_line,
+        "end_line": body.end_line,
+        "status": "open",
+        "created_by": author,
+        "created_at": ts,
+        "resolved_by": None,
+        "resolved_at": None,
+        "thread": [first_entry],
+    }
+    comments = _read_comments(workspace_id, clean_path)
+    comments.append(comment)
+    _write_comments(workspace_id, clean_path, comments)
+    return comment
+
+
+@router.post("/workspaces/{workspace_id}/files/comments/{comment_id}/replies", status_code=201)
+async def reply_to_file_comment(
+    workspace_id: str,
+    comment_id: str,
+    body: CommentReplyCreate,
+    request: Request,
+    path: str = Query(..., description="File path relative to workspace root"),
+):
+    _ensure_workspace(workspace_id)
+    clean_path = _ensure_workspace_file(workspace_id, path)
+    comments = _read_comments(workspace_id, clean_path)
+    for comment in comments:
+        if comment.get("id") != comment_id:
+            continue
+        entry = {
+            "id": str(uuid.uuid4()),
+            "body": body.body,
+            "created_by": _comment_author(request),
+            "created_at": now_iso(),
+        }
+        thread = comment.setdefault("thread", [])
+        if not isinstance(thread, list):
+            comment["thread"] = []
+        comment["thread"].append(entry)
+        _write_comments(workspace_id, clean_path, comments)
+        return entry
+    raise HTTPException(404, "Comment not found")
+
+
+@router.patch("/workspaces/{workspace_id}/files/comments/{comment_id}")
+async def update_file_comment(
+    workspace_id: str,
+    comment_id: str,
+    body: CommentPatch,
+    request: Request,
+    path: str = Query(..., description="File path relative to workspace root"),
+):
+    _ensure_workspace(workspace_id)
+    clean_path = _ensure_workspace_file(workspace_id, path)
+    comments = _read_comments(workspace_id, clean_path)
+    for comment in comments:
+        if comment.get("id") != comment_id:
+            continue
+        if body.status == "resolved":
+            comment["status"] = "resolved"
+            comment["resolved_by"] = _comment_author(request)
+            comment["resolved_at"] = now_iso()
+        else:
+            comment["status"] = "open"
+            comment["resolved_by"] = None
+            comment["resolved_at"] = None
+        _write_comments(workspace_id, clean_path, comments)
+        return comment
+    raise HTTPException(404, "Comment not found")
 
 
 # ── Update file metadata (status, etc.) ───────────────────────────

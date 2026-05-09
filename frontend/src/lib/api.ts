@@ -64,6 +64,42 @@ export interface FileItem {
 
 export type DocumentItem = FolderItem | FileItem;
 
+export interface CommentAuthor {
+  email: string;
+  name: string;
+}
+
+export interface CommentThreadEntry {
+  id: string;
+  body: string;
+  created_by: CommentAuthor;
+  created_at: string;
+}
+
+export interface DocumentComment {
+  id: string;
+  file_path: string;
+  anchor_text?: string | null;
+  start_line?: number | null;
+  end_line?: number | null;
+  status: "open" | "resolved";
+  created_by: CommentAuthor;
+  created_at: string;
+  resolved_by?: CommentAuthor | null;
+  resolved_at?: string | null;
+  thread: CommentThreadEntry[];
+}
+
+export type MemberRole = "ADMIN" | "CLIENT" | "INVARIANT";
+
+export interface MemberRoleRecord {
+  email: string;
+  role: MemberRole;
+  allowed: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 // ── Workspace API ──────────────────────────────────────────────
 
 export async function listWorkspaces(): Promise<Workspace[]> {
@@ -102,6 +138,18 @@ export async function updateWorkspace(
 
 export async function deleteWorkspace(id: string): Promise<void> {
   await request(`/api/workspaces/${id}`, { method: "DELETE" });
+}
+
+export async function listMembers(): Promise<{ members: MemberRoleRecord[]; roles: MemberRole[] }> {
+  return request("/api/auth/members");
+}
+
+export async function updateMemberRole(email: string, role: MemberRole): Promise<MemberRoleRecord> {
+  return request("/api/auth/members", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, role }),
+  });
 }
 
 // ── Documents API ──────────────────────────────────────────────
@@ -261,6 +309,102 @@ export async function writeTextFile(
   });
 }
 
+export interface KnowledgeBaseStatus {
+  workspace_id: string;
+  sync: {
+    hydrated: boolean;
+    state: "ready" | "hydrating";
+  };
+  knowledge_base: {
+    state: "ready" | "indexing" | "error";
+    file_count: number;
+    indexable_file_count: number;
+    indexed_chunk_count: number;
+    queue_depth: number;
+    pending_count: number;
+    running_count: number;
+    processed_count: number;
+    failed_count: number;
+    last_error?: Record<string, unknown> | null;
+  };
+}
+
+export async function getKnowledgeBaseStatus(workspaceId: string): Promise<KnowledgeBaseStatus> {
+  return request(`/api/workspaces/${workspaceId}/knowledge-base/status`);
+}
+
+/** Shown in admin UI and required verbatim for wipe-chroma. Must match backend WIPE_CONFIRMATION_PHRASE. */
+export const ADMIN_WIPE_CHROMA_PHRASE = "DELETE CHROMA" as const;
+
+export async function adminReindexWorkspace(
+  workspaceId: string,
+): Promise<{ workspace_id: string; enqueued: number }> {
+  return request("/api/admin/rag/reindex-workspace", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace_id: workspaceId }),
+  });
+}
+
+export async function adminWipeChroma(
+  confirmationPhrase: string,
+): Promise<{ deleted_collections: number }> {
+  return request("/api/admin/rag/wipe-chroma", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmation: confirmationPhrase }),
+  });
+}
+
+export async function listFileComments(workspaceId: string, path: string): Promise<DocumentComment[]> {
+  const params = new URLSearchParams({ path });
+  const data = await request<{ file_path: string; comments: DocumentComment[] }>(
+    `/api/workspaces/${workspaceId}/files/comments?${params}`,
+  );
+  return data.comments;
+}
+
+export async function createFileComment(
+  workspaceId: string,
+  path: string,
+  payload: { body: string; anchor_text?: string | null; start_line?: number | null; end_line?: number | null },
+): Promise<DocumentComment> {
+  const params = new URLSearchParams({ path });
+  return request(`/api/workspaces/${workspaceId}/files/comments?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function replyToFileComment(
+  workspaceId: string,
+  path: string,
+  commentId: string,
+  body: string,
+): Promise<CommentThreadEntry> {
+  const params = new URLSearchParams({ path });
+  return request(`/api/workspaces/${workspaceId}/files/comments/${commentId}/replies?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function updateFileCommentStatus(
+  workspaceId: string,
+  path: string,
+  commentId: string,
+  status: "open" | "resolved",
+): Promise<DocumentComment> {
+  const params = new URLSearchParams({ path });
+  return request(`/api/workspaces/${workspaceId}/files/comments/${commentId}?${params}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
 export async function getDownloadUrl(
   workspaceId: string,
   path: string
@@ -350,12 +494,19 @@ export async function browseGDriveFolder(
   return request(`/api/gdrive/folders?${params}`);
 }
 
+export interface GDriveImportResult {
+  imported_count: number;
+  error_count: number;
+  imported?: { name: string; path: string; size: number }[];
+  errors?: { name: string; error: string }[];
+}
+
 export async function importGDriveFolder(
   workspaceId: string,
   folderId: string,
   recursive: boolean = true,
   targetPath: string = "/"
-): Promise<{ imported_count: number; error_count: number }> {
+): Promise<GDriveImportResult> {
   return request(`/api/gdrive/import/${workspaceId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -371,7 +522,7 @@ export async function importGDriveSelection(
     folder_ids?: string[];
     target_path?: string;
   }
-): Promise<{ imported_count: number; error_count: number }> {
+): Promise<GDriveImportResult> {
   return request(`/api/gdrive/import/${workspaceId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -409,4 +560,104 @@ export async function uploadAndExtractZip(
     throw new Error(`API error ${res.status}: ${body}`);
   }
   return res.json();
+}
+
+// ── Document requests (Invariant ↔ Client) ─────────────────────
+
+export interface DocumentRequest {
+  id: string;
+  created_by_email: string;
+  created_by_name: string;
+  created_at: string;
+  title: string;
+  body: string;
+  desired_path: string;
+  status: string;
+  fulfilled_by_email?: string | null;
+  fulfilled_at?: string | null;
+  stored_path?: string | null;
+}
+
+export async function listDocumentRequests(workspaceId: string): Promise<DocumentRequest[]> {
+  return request(`/api/workspaces/${workspaceId}/document-requests`);
+}
+
+export async function createDocumentRequest(
+  workspaceId: string,
+  payload: { title: string; body?: string; desired_path?: string },
+): Promise<DocumentRequest> {
+  return request(`/api/workspaces/${workspaceId}/document-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function cancelDocumentRequest(workspaceId: string, requestId: string): Promise<void> {
+  await request(`/api/workspaces/${workspaceId}/document-requests/${requestId}`, {
+    method: "PATCH",
+  });
+}
+
+export async function fulfillDocumentRequest(
+  workspaceId: string,
+  requestId: string,
+  file: File,
+): Promise<{ stored_path: string; request: DocumentRequest }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  const res = await fetch(`/api/workspaces/${workspaceId}/document-requests/${requestId}/fulfill`, {
+    method: "POST",
+    body: formData,
+    headers,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`API error ${res.status}: ${body}`);
+  }
+  return res.json();
+}
+
+// ── Compliance roadmap (INVARIANT + ADMIN) ───────────────────────
+
+export interface ComplianceRoadmapTask {
+  id: string;
+  title: string;
+  description: string;
+  start: string;
+  end: string;
+  file_paths: string[];
+  links: string[];
+}
+
+export interface ComplianceRoadmapPhase {
+  id: string;
+  name: string;
+  order: number;
+  tasks: ComplianceRoadmapTask[];
+}
+
+export interface ComplianceRoadmap {
+  phases: ComplianceRoadmapPhase[];
+  updated_at: string | null;
+}
+
+export async function getComplianceRoadmap(workspaceId: string): Promise<ComplianceRoadmap> {
+  return request(`/api/workspaces/${workspaceId}/compliance-roadmap`);
+}
+
+export async function patchComplianceRoadmap(
+  workspaceId: string,
+  payload: { phases: ComplianceRoadmapPhase[] },
+): Promise<ComplianceRoadmap> {
+  return request(`/api/workspaces/${workspaceId}/compliance-roadmap`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }

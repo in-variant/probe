@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from collections import deque
 
 import local_cache
 from rag.indexer import delete_indexed_path, index_file, list_workspace_files
@@ -30,6 +31,8 @@ class IndexJobQueue:
         self.workers = workers
         self._tasks: list[asyncio.Task] = []
         self._pending: set[tuple[str, str, str]] = set()
+        self._running: set[tuple[str, str, str]] = set()
+        self._history: deque[dict] = deque(maxlen=100)
         self._started = False
         self.processed = 0
         self.failed = 0
@@ -70,12 +73,22 @@ class IndexJobQueue:
         while True:
             job = await self.queue.get()
             started = time.monotonic()
+            result = None
+            self._running.add(job.key)
             try:
                 if job.op == "delete":
                     await asyncio.to_thread(delete_indexed_path, job.workspace_id, job.path)
                 else:
-                    await asyncio.to_thread(index_file, job.workspace_id, job.path)
+                    result = await asyncio.to_thread(index_file, job.workspace_id, job.path)
                 self.processed += 1
+                self._history.append({
+                    "workspace_id": job.workspace_id,
+                    "path": job.path,
+                    "op": job.op,
+                    "status": "done",
+                    "chunk_count": getattr(result, "chunk_count", 0) if job.op != "delete" else 0,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                })
                 logger.info(
                     "rag_job_done worker=%s workspace=%s path=%s op=%s duration_ms=%s",
                     worker_id,
@@ -86,6 +99,14 @@ class IndexJobQueue:
                 )
             except Exception as exc:
                 self.failed += 1
+                self._history.append({
+                    "workspace_id": job.workspace_id,
+                    "path": job.path,
+                    "op": job.op,
+                    "status": "failed",
+                    "error": type(exc).__name__,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                })
                 logger.exception(
                     "rag_job_failed worker=%s workspace=%s path=%s op=%s error=%s",
                     worker_id,
@@ -96,6 +117,7 @@ class IndexJobQueue:
                 )
             finally:
                 self._pending.discard(job.key)
+                self._running.discard(job.key)
                 self.queue.task_done()
 
     def enqueue_workspace(self, workspace_id: str) -> int:
@@ -105,6 +127,22 @@ class IndexJobQueue:
                 count += 1
         logger.info("rag_workspace_enqueued workspace=%s files=%s", workspace_id, count)
         return count
+
+    def status(self, workspace_id: str | None = None) -> dict:
+        pending = [key for key in self._pending if workspace_id is None or key[0] == workspace_id]
+        running = [key for key in self._running if workspace_id is None or key[0] == workspace_id]
+        history = [item for item in self._history if workspace_id is None or item.get("workspace_id") == workspace_id]
+        failed = [item for item in history if item.get("status") == "failed"]
+        return {
+            "started": self._started,
+            "queue_depth": self.queue.qsize(),
+            "pending_count": len(pending),
+            "running_count": len(running),
+            "processed_count": self.processed,
+            "failed_count": self.failed,
+            "recent": history[-10:],
+            "last_error": failed[-1] if failed else None,
+        }
 
 
 index_queue = IndexJobQueue()

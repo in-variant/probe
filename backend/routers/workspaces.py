@@ -162,10 +162,16 @@ async def create_workspace(body: WorkspaceCreate, background_tasks: BackgroundTa
         final_slug = f"{slug}-{counter}"
         counter += 1
 
-    placeholder_path = f"{workspace_prefix(final_slug)}.keep"
-    local_cache.write_file(placeholder_path, b"")
-    from sync import sync_engine, SyncOp, OpType
-    sync_engine.enqueue(SyncOp(op=OpType.WRITE_FILE, path=placeholder_path, data=b"", metadata={"content_type": "application/octet-stream"}))
+    ws_prefix = workspace_prefix(final_slug)
+    for placeholder_path in (
+        f"{ws_prefix}.keep",
+        f"{ws_prefix}.comments/.keep",
+        f"{ws_prefix}.chats/.keep",
+        f"{ws_prefix}.traces/.keep",
+        f"{ws_prefix}.requests/.keep",
+        f"{ws_prefix}.roadmaps/.keep",
+    ):
+        write_file_blob(placeholder_path, b"", {"content_type": "application/octet-stream"})
 
     ts = now_iso()
     meta = {

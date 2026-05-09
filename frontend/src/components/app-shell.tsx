@@ -1,7 +1,17 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-import { FolderOpen, Home, LogOut, ChevronDown, User, FilePenLine } from "lucide-react";
+import {
+  FolderOpen,
+  Home,
+  LogOut,
+  ChevronDown,
+  User,
+  FilePenLine,
+  Settings,
+  Inbox,
+  MapPinned,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -12,7 +22,14 @@ const NAV_ITEMS = [
   { href: "/", icon: Home, label: "Home" },
   { href: "/workspaces", icon: FolderOpen, label: "Workspaces" },
   { href: "/document-editor", icon: FilePenLine, label: "Document Editor" },
+  { href: "/requests", icon: Inbox, label: "Requests" },
 ] as const;
+
+const COMPLIANCE_NAV = {
+  href: "/compliance-roadmap",
+  icon: MapPinned,
+  label: "Compliance roadmap",
+} as const;
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   return (
@@ -98,6 +115,18 @@ function UserDropdown() {
             <User className="h-4 w-4" />
             Profile
           </button>
+          {user.role === "ADMIN" && (
+            <button
+              onClick={() => {
+                setOpen(false);
+                router.push("/admin/settings");
+              }}
+              className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
+            >
+              <Settings className="h-4 w-4" />
+              Settings
+            </button>
+          )}
           <button
             onClick={() => {
               setOpen(false);
@@ -134,6 +163,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return <LoginScreen onLogin={login} />;
   }
 
+  const showComplianceNav =
+    user.role === "INVARIANT" || user.role === "ADMIN";
+
+  const navEntries = [
+    ...NAV_ITEMS,
+    ...(showComplianceNav ? [COMPLIANCE_NAV] : []),
+  ];
+
   return (
     <div className="paper-grain flex h-dvh flex-col overflow-hidden bg-background">
       {/* Top navbar */}
@@ -146,7 +183,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* Nav links */}
           <nav className="flex items-center gap-1">
-            {NAV_ITEMS.map((item) => {
+            {navEntries.map((item) => {
               const Icon = item.icon;
               const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
               return (

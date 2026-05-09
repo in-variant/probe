@@ -34,6 +34,24 @@ def _sidecar_path(workspace_id: str, path: str) -> str:
     return f"{prefix}{EXTRACTED_TEXT_DIR}/{path.lstrip('/')}.txt"
 
 
+def path_has_forbidden_dot_folder(path: str) -> bool:
+    """
+    True if any path segment starts with '.' except '.extracted_text'.
+
+    Keeps RAG / indexing out of '.chats', '.comments', '.traces', etc., while still
+    allowing the dedicated extracted-text sidecar tree (handled separately; raw
+    sidecar paths are not indexed — see is_indexable_path).
+    """
+    clean = path.strip().lstrip("/")
+    for part in PurePosixPath(clean).parts:
+        if not part.startswith("."):
+            continue
+        if part == EXTRACTED_TEXT_DIR:
+            continue
+        return True
+    return False
+
+
 def read_indexable_text(workspace_id: str, path: str) -> str:
     sidecar = local_cache.read_file(_sidecar_path(workspace_id, path))
     if sidecar:
@@ -52,12 +70,16 @@ def read_indexable_text(workspace_id: str, path: str) -> str:
 
 
 def is_indexable_path(path: str) -> bool:
-    name = PurePosixPath(path).name
+    clean = path.strip().lstrip("/")
+    # Sidecar mirror files are not indexed as separate paths (content is read for the source doc).
+    if clean.startswith(f"{EXTRACTED_TEXT_DIR}/"):
+        return False
+    if path_has_forbidden_dot_folder(clean):
+        return False
+    name = PurePosixPath(clean).name
     if not name or name.startswith("."):
         return False
-    if f"/{EXTRACTED_TEXT_DIR}/" in f"/{path}":
-        return False
-    ext = PurePosixPath(path).suffix.lstrip(".").lower()
+    ext = PurePosixPath(clean).suffix.lstrip(".").lower()
     return ext in TEXT_EXTENSIONS or ext in {"pdf", "docx", "xlsx"}
 
 

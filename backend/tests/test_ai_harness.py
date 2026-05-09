@@ -12,8 +12,11 @@ from ai_harness import (
     _build_user_prompt,
     _read_file_text,
     _generate_summary,
+    _hit_trace,
+    _log_interaction,
     search_documents,
 )
+from rag.types import RagHit
 
 
 def _seed_workspace(ws_id: str, name: str = "Test"):
@@ -144,7 +147,7 @@ class TestGenerateSummary:
 class TestSearchDocuments:
     def test_empty_workspace_returns_no_docs(self):
         _seed_workspace("ws-se")
-        with patch("ai_harness._log_interaction"):
+        with patch("ai_harness._log_interaction", return_value={}):
             result = search_documents("ws-se", "query", "sess")
         assert result["results"] == []
         assert "No documents" in result["message"]
@@ -169,7 +172,7 @@ class TestSearchDocuments:
         mock_client.chat.completions.create.side_effect = [mock_completion, summary_completion]
 
         with patch("ai_harness._get_openai_client", return_value=mock_client), \
-             patch("ai_harness._log_interaction"):
+             patch("ai_harness._log_interaction", return_value={}):
             result = search_documents("ws-ss", "find file", "sess")
 
         assert len(result["results"]) == 1
@@ -188,7 +191,7 @@ class TestSearchDocuments:
         mock_client.chat.completions.create.return_value = mock_completion
 
         with patch("ai_harness._get_openai_client", return_value=mock_client), \
-             patch("ai_harness._log_interaction"):
+             patch("ai_harness._log_interaction", return_value={}):
             result = search_documents("ws-ij", "query", "sess")
 
         assert result["results"] == []
@@ -202,8 +205,113 @@ class TestSearchDocuments:
         mock_client.chat.completions.create.side_effect = RuntimeError("API down")
 
         with patch("ai_harness._get_openai_client", return_value=mock_client), \
-             patch("ai_harness._log_interaction"):
+             patch("ai_harness._log_interaction", return_value={}):
             result = search_documents("ws-err", "query", "sess")
 
         assert result["results"] == []
         assert "failed" in result["message"].lower()
+
+    def test_research_rag_uses_subquery_pipeline_when_available(self):
+        _seed_workspace("ws-rdp")
+        _seed_file("ws-rdp", "a.txt", b"data")
+        hit = RagHit(
+            workspace_id="ws-rdp",
+            path="/a.txt",
+            chunk_id="c1",
+            chunk_index=0,
+            text="excerpt",
+            score=0.9,
+            metadata={},
+        )
+        deep_summary = "## SubQ\n\nSection body\n\nSources:\nSource: a.txt"
+        with patch("ai_harness.retrieve", return_value=[hit]), \
+             patch("ai_harness._research_deep_pipeline", return_value=(deep_summary, [hit])), \
+             patch("ai_harness._log_interaction", return_value={}):
+            result = search_documents(
+                "ws-rdp",
+                "What is the policy?\n\nAgent mode: Research\n\nReturn a clean markdown answer.",
+                "sess-rdp",
+            )
+        assert "## SubQ" in result["summary"]
+        assert len(result["results"]) >= 1
+
+    def test_hit_trace_reads_content_hash_from_metadata(self):
+        hit = RagHit(
+            workspace_id="ws",
+            path="/doc.txt",
+            chunk_id="chunk-1",
+            chunk_index=0,
+            text="trace preview",
+            score=0.987654321,
+            metadata={"content_hash": "hash-1"},
+        )
+        trace = _hit_trace(hit)
+        assert trace["content_hash"] == "hash-1"
+        assert trace["score"] == 0.987654
+
+    def test_hit_trace_tolerates_missing_content_hash(self):
+        hit = RagHit(
+            workspace_id="ws",
+            path="/doc.txt",
+            chunk_id="chunk-1",
+            chunk_index=0,
+            text="trace preview",
+            score=0.9,
+            metadata={},
+        )
+        trace = _hit_trace(hit)
+        assert "content_hash" not in trace
+
+    def test_log_interaction_writes_workspace_chat_and_trace(self):
+        _seed_workspace("ws-log", "Log WS")
+        paths = _log_interaction(
+            "ws-log",
+            "interaction-1",
+            "session-1",
+            "2025-01-01T00:00:00+00:00",
+            {
+                "interaction_id": "interaction-1",
+                "session_id": "session-1",
+                "workspace_id": "ws-log",
+                "query": "Create a useful summary report",
+                "document_count": 1,
+            },
+            {
+                "message": "Found 1 relevant document(s).",
+                "summary": "Summary text",
+                "results": [{"path": "/doc.txt", "score": 0.9}],
+            },
+            {"retrieval": {"mode": "rag", "hits": [{"chunk_id": "c1", "preview": "short snippet"}]}},
+        )
+
+        assert paths["chat_path"].startswith(workspace_prefix("ws-log") + ".chats/create-a-useful-summary-report-session-1")
+        assert paths["trace_path"] == workspace_prefix("ws-log") + ".traces/interaction-1.json"
+
+        chat = local_cache.read_json(paths["chat_path"])
+        trace = local_cache.read_json(paths["trace_path"])
+        assert chat["session_id"] == "session-1"
+        assert chat["turns"][0]["user"] == "Create a useful summary report"
+        assert trace["trace"]["retrieval"]["mode"] == "rag"
+
+    def test_log_interaction_appends_to_existing_chat(self):
+        _seed_workspace("ws-log-append", "Log Append WS")
+        first = _log_interaction(
+            "ws-log-append",
+            "interaction-1",
+            "session-append",
+            "2025-01-01T00:00:00+00:00",
+            {"interaction_id": "interaction-1", "session_id": "session-append", "query": "First prompt"},
+            {"message": "ok", "summary": "one", "results": []},
+        )
+        second = _log_interaction(
+            "ws-log-append",
+            "interaction-2",
+            "session-append",
+            "2025-01-01T00:00:01+00:00",
+            {"interaction_id": "interaction-2", "session_id": "session-append", "query": "Second prompt"},
+            {"message": "ok", "summary": "two", "results": []},
+        )
+
+        assert first["chat_path"] == second["chat_path"]
+        chat = local_cache.read_json(first["chat_path"])
+        assert [turn["user"] for turn in chat["turns"]] == ["First prompt", "Second prompt"]

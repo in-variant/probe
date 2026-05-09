@@ -16,6 +16,7 @@ import {
   type GDriveFolder,
   type GDriveFile,
 } from "@/lib/api";
+import { toast } from "sonner";
 
 function DriveLogo({ size = 16 }: { size?: number }) {
   return (
@@ -212,13 +213,21 @@ export function GoogleDriveFolderPicker({
 interface DriveFileBrowserProps {
   workspaceId: string;
   currentPath: string;
-  onImportComplete: () => void;
+  /** Called after a successful import; includes workspace-relative paths when the API returns them. */
+  onImportComplete: (detail?: { imported: { path: string; name: string }[] }) => void;
+  /** When set, only image files can be selected; folder import is disabled (e.g. markdown image insert). */
+  imagesOnly?: boolean;
+}
+
+function isDriveImage(file: GDriveFile): boolean {
+  return (file.mimeType || "").toLowerCase().startsWith("image/");
 }
 
 export function DriveFileBrowser({
   workspaceId,
   currentPath,
   onImportComplete,
+  imagesOnly = false,
 }: DriveFileBrowserProps) {
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -256,10 +265,12 @@ export function DriveFileBrowser({
   }, [currentFolderId, loadFolder]);
 
   async function handleImportFolder() {
+    if (imagesOnly) return;
     setImporting(true);
     try {
-      await importGDriveFolder(workspaceId, currentFolderId, true, currentPath);
-      onImportComplete();
+      const result = await importGDriveFolder(workspaceId, currentFolderId, true, currentPath);
+      const imported = result.imported?.map((r) => ({ path: r.path, name: r.name })) ?? [];
+      onImportComplete(imported.length ? { imported } : undefined);
     } catch {
       // error handled by caller
     } finally {
@@ -269,15 +280,29 @@ export function DriveFileBrowser({
 
   async function handleImportSelection() {
     if (selectedFileIds.size === 0 && selectedFolderIds.size === 0) return;
+    let fileIds = Array.from(selectedFileIds);
+    let folderIds = Array.from(selectedFolderIds);
+    if (imagesOnly) {
+      folderIds = [];
+      fileIds = fileIds.filter((id) => {
+        const meta = files.find((f) => f.id === id);
+        return meta ? isDriveImage(meta) : false;
+      });
+      if (fileIds.length === 0) {
+        toast.error("Select at least one image file");
+        return;
+      }
+    }
     setImporting(true);
     try {
-      await importGDriveSelection(workspaceId, {
+      const result = await importGDriveSelection(workspaceId, {
         parent_folder_id: currentFolderId,
-        file_ids: Array.from(selectedFileIds),
-        folder_ids: Array.from(selectedFolderIds),
+        file_ids: fileIds,
+        folder_ids: folderIds,
         target_path: currentPath,
       });
-      onImportComplete();
+      const imported = result.imported?.map((r) => ({ path: r.path, name: r.name })) ?? [];
+      onImportComplete(imported.length ? { imported } : undefined);
     } catch {
       // error handled by caller
     } finally {
@@ -346,12 +371,15 @@ export function DriveFileBrowser({
           <div>
             {folders.map((folder) => (
               <div key={folder.id} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm transition-colors hover:bg-zinc-50">
-                <input
-                  type="checkbox"
-                  checked={selectedFolderIds.has(folder.id)}
-                  onChange={() => toggleFolder(folder.id)}
-                  className="h-4 w-4 rounded border-zinc-300 accent-blue-600"
-                />
+                {!imagesOnly && (
+                  <input
+                    type="checkbox"
+                    checked={selectedFolderIds.has(folder.id)}
+                    onChange={() => toggleFolder(folder.id)}
+                    className="h-4 w-4 rounded border-zinc-300 accent-blue-600"
+                  />
+                )}
+                {imagesOnly && <span className="w-4 shrink-0" aria-hidden />}
                 <button
                   type="button"
                   onClick={() => {
@@ -366,18 +394,32 @@ export function DriveFileBrowser({
                 </button>
               </div>
             ))}
-            {files.map((file) => (
-              <div key={file.id} className="flex items-center gap-2.5 px-3 py-2.5 text-sm">
-                <input
-                  type="checkbox"
-                  checked={selectedFileIds.has(file.id)}
-                  onChange={() => toggleFile(file.id)}
-                  className="h-4 w-4 rounded border-zinc-300 accent-blue-600"
-                />
-                <FileText className="h-4 w-4 shrink-0 text-zinc-500" />
-                <span className="min-w-0 flex-1 truncate text-zinc-600">{file.name}</span>
-              </div>
-            ))}
+            {files.map((file) => {
+              const imageOk = isDriveImage(file);
+              const selectable = !imagesOnly || imageOk;
+              return (
+                <div
+                  key={file.id}
+                  className={cn(
+                    "flex items-center gap-2.5 px-3 py-2.5 text-sm",
+                    !selectable && "opacity-45",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedFileIds.has(file.id)}
+                    disabled={!selectable}
+                    onChange={() => toggleFile(file.id)}
+                    className="h-4 w-4 rounded border-zinc-300 accent-blue-600 disabled:cursor-not-allowed"
+                  />
+                  <FileText className="h-4 w-4 shrink-0 text-zinc-500" />
+                  <span className="min-w-0 flex-1 truncate text-zinc-600">{file.name}</span>
+                  {imagesOnly && !imageOk && (
+                    <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-zinc-400">Not an image</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -387,34 +429,46 @@ export function DriveFileBrowser({
         <p className="text-xs text-zinc-400">
           {folders.length} folder{folders.length !== 1 ? "s" : ""}, {files.length} file{files.length !== 1 ? "s" : ""}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={handleImportSelection}
-            disabled={importing || selectedCount === 0}
+            disabled={
+              importing ||
+              (imagesOnly
+                ? !Array.from(selectedFileIds).some((id) => files.find((f) => f.id === id && isDriveImage(f)))
+                : selectedCount === 0)
+            }
             className="inline-flex items-center gap-1.5 rounded-full border border-zinc-300 bg-white px-4 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50"
           >
             {importing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-            Import selected {selectedCount > 0 ? `(${selectedCount})` : ""}
+            Import selected{" "}
+            {!imagesOnly && selectedCount > 0
+              ? `(${selectedCount})`
+              : imagesOnly && selectedFileIds.size > 0
+                ? `(${Array.from(selectedFileIds).filter((id) => files.find((f) => f.id === id && isDriveImage(f))).length})`
+                : ""}
           </button>
-          <button
-            type="button"
-            onClick={handleImportFolder}
-            disabled={importing}
-            className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-          >
-            {importing ? (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Importing…
-              </>
-            ) : (
-              <>
-                <Check className="h-3 w-3" />
-                Import entire folder
-              </>
-            )}
-          </button>
+          {!imagesOnly && (
+            <button
+              type="button"
+              onClick={handleImportFolder}
+              disabled={importing}
+              className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            >
+              {importing ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Importing…
+                </>
+              ) : (
+                <>
+                  <Check className="h-3 w-3" />
+                  Import entire folder
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -53,6 +53,9 @@ class ChromaStore:
         collection.delete(where={"path": path})
         logger.info("rag_delete_path workspace=%s path=%s", workspace_id, path)
 
+    def chunk_count(self, workspace_id: str) -> int:
+        return int(self.collection(workspace_id).count())
+
     def query(
         self,
         workspace_id: str,
@@ -91,6 +94,27 @@ class ChromaStore:
         logger.info("rag_query workspace=%s top_k=%s hits=%s", workspace_id, top_k, len(hits))
         return hits
 
+    def delete_workspace_collection(self, workspace_id: str) -> None:
+        """Remove the Chroma collection for one workspace (vectors only)."""
+        name = collection_name(workspace_id)
+        try:
+            self.client.delete_collection(name)
+            logger.info("rag_delete_workspace_collection name=%s", name)
+        except Exception as exc:
+            logger.info("rag_delete_workspace_collection_skip name=%s err=%s", name, type(exc).__name__)
+
+    def delete_all_collections(self) -> int:
+        """Delete every collection in this Chroma persist directory (vectors only; no GCS)."""
+        deleted = 0
+        for coll in self.client.list_collections():
+            try:
+                self.client.delete_collection(coll.name)
+                deleted += 1
+            except Exception as exc:
+                logger.warning("rag_delete_collection_failed name=%s err=%s", getattr(coll, "name", coll), type(exc).__name__)
+        logger.info("rag_delete_all_collections deleted=%s", deleted)
+        return deleted
+
 
 _store: ChromaStore | None = None
 
@@ -105,4 +129,10 @@ def get_store() -> ChromaStore:
 def set_store_for_tests(store: ChromaStore | None) -> None:
     global _store
     _store = store
+
+
+def reset_store_singleton() -> None:
+    """Drop the module-level client so the next get_store() opens a fresh PersistentClient."""
+    global _store
+    _store = None
 

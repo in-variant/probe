@@ -109,16 +109,20 @@ def client():
     from contextlib import asynccontextmanager
     from httpx import AsyncClient, ASGITransport
     from fastapi import FastAPI
-    from routers import workspaces, documents, search
+    from routers import workspaces, documents, search, auth, document_requests, compliance_roadmap, admin_rag
 
     @asynccontextmanager
     async def _noop_lifespan(app: FastAPI):
         yield
 
     app = FastAPI(lifespan=_noop_lifespan)
+    app.include_router(auth.router, prefix="/api")
     app.include_router(workspaces.router, prefix="/api")
     app.include_router(documents.router, prefix="/api")
     app.include_router(search.router, prefix="/api")
+    app.include_router(document_requests.router, prefix="/api")
+    app.include_router(compliance_roadmap.router, prefix="/api")
+    app.include_router(admin_rag.router, prefix="/api")
 
     from sync import sync_engine
     sync_engine.is_hydrated = True

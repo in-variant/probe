@@ -2,7 +2,7 @@ from pathlib import Path
 
 import local_cache
 from rag.chroma_store import ChromaStore, set_store_for_tests
-from rag.indexer import index_file, read_indexable_text
+from rag.indexer import index_file, is_indexable_path, read_indexable_text
 from storage import workspace_prefix, write_file_blob
 
 
@@ -44,6 +44,18 @@ def test_index_file_prefers_extracted_text_sidecar(tmp_path):
 
     assert result.status == "indexed"
     assert result.chunk_count == 1
+
+
+def test_is_indexable_path_skips_dot_folders_except_extracted_sidecar_rule():
+    assert is_indexable_path("notes.md") is True
+    assert is_indexable_path("folder/notes.md") is True
+    assert is_indexable_path(".chats/session.json") is False
+    assert is_indexable_path("ws/.comments/thread.json") is False
+    assert is_indexable_path("deep/.traces/out.txt") is False
+    # Raw sidecar files are never indexed as their own paths.
+    assert is_indexable_path(".extracted_text/report.pdf.txt") is False
+    # Source PDF still indexable (text from sidecar).
+    assert is_indexable_path("report.pdf") is True
 
 
 def test_index_file_deletes_chunks_when_text_disappears(tmp_path):

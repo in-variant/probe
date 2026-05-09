@@ -4,6 +4,7 @@ from unittest.mock import patch
 from httpx import AsyncClient
 
 import local_cache
+from routers.auth import AUTH_SESSION_STORE
 from storage import workspace_prefix, workspace_meta_path, write_json_blob, write_file_blob
 
 
@@ -33,6 +34,14 @@ def _seed_file(ws_id: str, path: str, content: bytes = b"hello", status: str = "
         "time_created": "2025-01-01T00:00:00+00:00",
         "updated": "2025-01-01T00:00:00+00:00",
     })
+
+
+def _auth_headers(token: str = "test-token") -> dict[str, str]:
+    AUTH_SESSION_STORE[token] = {
+        "email": "editor@example.com",
+        "name": "Editor User",
+    }
+    return {"Authorization": f"Bearer {token}"}
 
 
 class TestListDocuments:
@@ -234,6 +243,23 @@ class TestGetFile:
         assert resp.status_code == 404
 
 
+class TestKnowledgeBaseStatus:
+    @pytest.mark.asyncio
+    async def test_status_returns_metadata_only(self, client: AsyncClient):
+        _seed_workspace("ws-kb")
+        _seed_file("ws-kb", "doc.txt", b"secret document text")
+
+        resp = await client.get("/api/workspaces/ws-kb/knowledge-base/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["workspace_id"] == "ws-kb"
+        assert data["sync"]["state"] in {"ready", "hydrating"}
+        assert data["knowledge_base"]["file_count"] == 1
+        assert data["knowledge_base"]["indexable_file_count"] == 1
+        assert "secret document text" not in str(data)
+
+
 class TestGetFileContent:
     @pytest.mark.asyncio
     async def test_success(self, client: AsyncClient):
@@ -389,6 +415,75 @@ class TestDownloadUrl:
         assert resp.status_code == 200
         assert resp.json()["url"] == "https://signed.url"
         assert resp.json()["expires_in"] == 3600
+
+
+class TestFileComments:
+    @pytest.mark.asyncio
+    async def test_comment_crud_persists_metadata_only_sidecar(self, client: AsyncClient):
+        _seed_workspace("ws-comments")
+        _seed_file("ws-comments", "docs/report.md", b"# Report\n\nBody")
+        headers = _auth_headers()
+
+        created = await client.post(
+            "/api/workspaces/ws-comments/files/comments",
+            params={"path": "docs/report.md"},
+            headers=headers,
+            json={
+                "body": "Please clarify this section.",
+                "anchor_text": "Body",
+                "start_line": 3,
+                "end_line": 3,
+            },
+        )
+        assert created.status_code == 201
+        comment = created.json()
+        assert comment["file_path"] == "docs/report.md"
+        assert comment["status"] == "open"
+        assert comment["created_by"]["email"] == "editor@example.com"
+        assert comment["thread"][0]["body"] == "Please clarify this section."
+
+        reply = await client.post(
+            f"/api/workspaces/ws-comments/files/comments/{comment['id']}/replies",
+            params={"path": "docs/report.md"},
+            headers=headers,
+            json={"body": "Added more context."},
+        )
+        assert reply.status_code == 201
+        assert reply.json()["created_by"]["name"] == "Editor User"
+
+        resolved = await client.patch(
+            f"/api/workspaces/ws-comments/files/comments/{comment['id']}",
+            params={"path": "docs/report.md"},
+            headers=headers,
+            json={"status": "resolved"},
+        )
+        assert resolved.status_code == 200
+        assert resolved.json()["resolved_by"]["email"] == "editor@example.com"
+
+        listed = await client.get(
+            "/api/workspaces/ws-comments/files/comments",
+            params={"path": "docs/report.md"},
+        )
+        assert listed.status_code == 200
+        comments = listed.json()["comments"]
+        assert len(comments) == 1
+        assert comments[0]["status"] == "resolved"
+        assert len(comments[0]["thread"]) == 2
+
+        sidecar = local_cache.read_json(f"{workspace_prefix('ws-comments')}.comments/docs/report.md.json")
+        assert sidecar is not None
+        assert "Report" not in str(sidecar)
+
+    @pytest.mark.asyncio
+    async def test_create_comment_requires_auth(self, client: AsyncClient):
+        _seed_workspace("ws-comments-auth")
+        _seed_file("ws-comments-auth", "report.md", b"# Report")
+        resp = await client.post(
+            "/api/workspaces/ws-comments-auth/files/comments",
+            params={"path": "report.md"},
+            json={"body": "Needs owner."},
+        )
+        assert resp.status_code == 401
 
 
 class TestZipImport:

@@ -3,16 +3,13 @@ AI Harness for document retrieval.
 - Accepts a natural language query + workspace ID
 - Scans workspace documents from local cache
 - Uses OpenAI to find the most relevant documents
-- Logs every interaction (request + response) as JSON to GCS bucket
-  `probe-information-retrieval` under folder `akashalabdhi/`
-- Upload is async (background thread), local JSON is deleted after upload
+- Persists chat transcripts and agent traces under the workspace prefix
 """
 
 import json
 import logging
 import os
 import re
-import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,16 +21,11 @@ from openai import OpenAI
 load_dotenv(Path(__file__).parent / ".env")
 
 import local_cache
-from gcs_client import get_client
 from rag.retriever import citations_text, retrieve
 from rag.types import RagHit
-from storage import workspace_prefix, read_json_blob, workspace_meta_path
+from storage import workspace_prefix, read_json_blob, write_json_blob, workspace_meta_path
 
 logger = logging.getLogger(__name__)
-
-IR_BUCKET_NAME = "probe-information-retrieval"
-IR_FOLDER = "akashalabdhi"
-IR_LOCAL_DIR = Path("/tmp/probe-ir-logs")
 
 OPENAI_MODEL = "gpt-4.1-mini"
 
@@ -45,10 +37,6 @@ def _get_openai_client() -> OpenAI:
     if _openai_client is None:
         _openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
     return _openai_client
-
-
-def _ensure_ir_dir():
-    IR_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
 
 
 _FENCE_RE = re.compile(r"^```(?:\w*)\s*\n(.*?)```\s*$", re.DOTALL)
@@ -84,6 +72,8 @@ def _collect_documents(workspace_id: str) -> list[dict[str, Any]]:
                 "original_name": meta.get("original_name", fname),
             })
         for d in dirs:
+            if d.startswith("."):
+                continue
             _walk(f"{rel_path}/{d}")
 
     _walk(prefix)
@@ -136,6 +126,21 @@ Format:
 
 Target depth: 800-1400 words when the evidence supports it."""
 
+RESEARCH_DECOMPOSE_SYSTEM_PROMPT = """You break a research question into 3 to 6 focused sub-questions for searching technical documents.
+Return ONLY a JSON array of strings. Each element is one short sub-question (plain text, no numbering prefix).
+If the question is narrow, still return 3 sub-questions that explore distinct angles (definitions, constraints, operations, risks, etc.).
+Do not use markdown fences or any text outside the JSON array."""
+
+RESEARCH_SECTION_SYSTEM_PROMPT = """You answer exactly ONE sub-question using only the provided document excerpts.
+
+Write a detailed markdown section (about 300-700 words when the evidence supports it) with:
+- A ### heading that briefly restates the sub-question
+- Short paragraphs; bullets where helpful
+- Concrete values and constraints when present
+- Note gaps if excerpts are insufficient
+
+Rules: do not invent facts. Do not use em dashes. Use only the excerpts."""
+
 MAX_CONTENT_BYTES_PER_FILE = 30_000
 MAX_FILES_FOR_SUMMARY = 5
 EXTRACTED_TEXT_DIR = ".extracted_text"
@@ -143,6 +148,118 @@ EXTRACTED_TEXT_DIR = ".extracted_text"
 
 def _is_research_query(query: str) -> bool:
     return "agent mode: research" in query.lower()
+
+
+def _core_query_for_research(query: str) -> str:
+    """Strip agent-mode boilerplate and referenced-file lists so decomposition sees the user's ask."""
+    lines_out: list[str] = []
+    skipping_refs = False
+    for line in query.split("\n"):
+        stripped = line.strip()
+        lower_stripped = stripped.lower()
+        if lower_stripped.startswith("referenced files:"):
+            skipping_refs = True
+            continue
+        if skipping_refs:
+            if stripped.startswith("- "):
+                continue
+            if stripped == "":
+                skipping_refs = False
+                continue
+            skipping_refs = False
+        if "agent mode:" in stripped.lower():
+            continue
+        if lower_stripped.startswith("return a clean markdown"):
+            break
+        lines_out.append(line)
+    return "\n".join(lines_out).strip()
+
+
+def _decompose_research_query(user_query: str) -> list[str]:
+    core = _core_query_for_research(user_query)
+    if len(core) < 8:
+        return []
+    try:
+        client = _get_openai_client()
+        completion = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": RESEARCH_DECOMPOSE_SYSTEM_PROMPT},
+                {"role": "user", "content": core},
+            ],
+            temperature=0.15,
+            max_tokens=500,
+        )
+        raw = _strip_markdown_fences((completion.choices[0].message.content or "").strip())
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            return []
+        out = [str(item).strip() for item in data if str(item).strip()]
+        return out[:8]
+    except Exception:
+        logger.exception("Research query decomposition failed")
+        return []
+
+
+def _summarize_research_section(sub_query: str, hits: list[RagHit]) -> str:
+    if not hits:
+        return ""
+    chars_per_hit = 2800
+    file_sections = [
+        f"--- {hit.path.lstrip('/')} chunk {hit.chunk_index} ---\n{hit.text[:chars_per_hit]}"
+        for hit in hits[:10]
+        if hit.text.strip()
+    ]
+    if not file_sections:
+        return ""
+    user_msg = f"Sub-question: {sub_query}\n\nRetrieved document excerpts:\n{chr(10).join(file_sections)}"
+    try:
+        client = _get_openai_client()
+        completion = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": RESEARCH_SECTION_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.1,
+            max_tokens=900,
+        )
+        return (completion.choices[0].message.content or "").strip()
+    except Exception:
+        logger.exception("Research section summary failed")
+        return ""
+
+
+def _research_deep_pipeline(
+    workspace_id: str, query: str, seed_hits: list[RagHit]
+) -> tuple[str, list[RagHit]] | None:
+    """Multi-step research: decompose query, retrieve per sub-question, merge evidence, section summaries."""
+    subqs = _decompose_research_query(query)
+    if len(subqs) < 2:
+        return None
+    merged: dict[str, RagHit] = {hit.chunk_id: hit for hit in seed_hits}
+    sections: list[str] = []
+    for subq in subqs:
+        try:
+            sub_hits = retrieve(workspace_id, subq, top_k=8)
+        except Exception:
+            logger.exception("Per-subquery retrieve failed")
+            sub_hits = []
+        for hit in sub_hits:
+            merged.setdefault(hit.chunk_id, hit)
+        body = _summarize_research_section(subq, sub_hits)
+        if body:
+            heading = subq.strip()
+            if len(heading) > 100:
+                heading = heading[:97] + "..."
+            sections.append(f"## {heading}\n\n{body}")
+    if not sections:
+        return None
+    merged_hits = sorted(merged.values(), key=lambda item: item.score, reverse=True)
+    summary_body = "\n\n".join(sections)
+    source_block = citations_text(merged_hits)
+    summary = f"{summary_body}{source_block}" if source_block else summary_body
+    return summary, merged_hits
 
 
 def _read_file_text(workspace_id: str, doc_path: str) -> str | None:
@@ -248,21 +365,81 @@ def _build_user_prompt(query: str, documents: list[dict[str, Any]]) -> str:
 User query: "{query}" """
 
 
-def _upload_interaction_async(local_path: Path, gcs_key: str):
-    """Upload the interaction JSON to GCS and delete the local file."""
-    try:
-        client = get_client()
-        bucket = client.bucket(IR_BUCKET_NAME)
-        blob = bucket.blob(gcs_key)
-        blob.upload_from_filename(str(local_path), content_type="application/json")
-        logger.info(f"IR log uploaded: {gcs_key}")
-    except Exception:
-        logger.exception(f"Failed to upload IR log: {gcs_key}")
-    finally:
-        try:
-            local_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+def _slugify_chat_name(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return (slug[:48].strip("-") or "chat")
+
+
+def _safe_session_id(session_id: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.-]+", "-", session_id).strip("-")[:80] or "session"
+
+
+def _find_chat_path(workspace_id: str, session_id: str) -> str | None:
+    chat_dir = f"{workspace_prefix(workspace_id)}.chats"
+    _, files = local_cache.list_dir(chat_dir)
+    for filename in files:
+        if not filename.endswith(".json"):
+            continue
+        path = f"{chat_dir}/{filename}"
+        data = read_json_blob(path)
+        if data and data.get("session_id") == session_id:
+            return path
+    return None
+
+
+def _upsert_chat(
+    workspace_id: str,
+    session_id: str,
+    timestamp: str,
+    request_payload: dict[str, Any],
+    response_payload: dict[str, Any],
+) -> str:
+    """Append a user-visible turn to the workspace chat transcript."""
+    chat_path = _find_chat_path(workspace_id, session_id)
+    if chat_path:
+        chat = read_json_blob(chat_path) or {}
+    else:
+        slug = _slugify_chat_name(str(request_payload.get("query", "")))
+        chat_path = f"{workspace_prefix(workspace_id)}.chats/{slug}-{_safe_session_id(session_id)}.json"
+        chat = {
+            "session_id": session_id,
+            "workspace_id": workspace_id,
+            "title": slug.replace("-", " ").title(),
+            "created_at": timestamp,
+            "turns": [],
+        }
+
+    turns = chat.get("turns")
+    if not isinstance(turns, list):
+        turns = []
+    turns.append({
+        "interaction_id": request_payload.get("interaction_id"),
+        "timestamp": timestamp,
+        "user": request_payload.get("query", ""),
+        "assistant": {
+            "message": response_payload.get("message", ""),
+            "summary": response_payload.get("summary", ""),
+            "results": response_payload.get("results", []),
+        },
+    })
+    chat["turns"] = turns
+    chat["updated_at"] = timestamp
+    write_json_blob(chat_path, chat)
+    return chat_path
+
+
+def _hit_trace(hit: RagHit) -> dict[str, Any]:
+    trace = {
+        "chunk_id": hit.chunk_id,
+        "path": hit.path,
+        "chunk_index": hit.chunk_index,
+        "score": round(hit.score, 6),
+        "preview": hit.text[:500],
+    }
+    content_hash = hit.metadata.get("content_hash") if isinstance(hit.metadata, dict) else None
+    if content_hash:
+        trace["content_hash"] = content_hash
+    return trace
 
 
 def search_documents(workspace_id: str, query: str, session_id: str) -> dict[str, Any]:
@@ -294,8 +471,8 @@ def search_documents(workspace_id: str, query: str, session_id: str) -> dict[str
             "results": [],
             "message": "No documents found in this workspace.",
         }
-        _log_interaction(interaction_id, session_id, timestamp, request_payload, response_payload)
-        return {"interaction_id": interaction_id, **response_payload}
+        paths = _log_interaction(workspace_id, interaction_id, session_id, timestamp, request_payload, response_payload)
+        return {"interaction_id": interaction_id, **paths, **response_payload}
 
     research = _is_research_query(query)
     try:
@@ -315,8 +492,31 @@ def search_documents(workspace_id: str, query: str, session_id: str) -> dict[str
         hits = []
 
     if hits:
+        hits_for_summary = hits
+        if research:
+            deep = _research_deep_pipeline(workspace_id, query, hits)
+            if deep:
+                summary, hits_for_summary = deep
+                source_block = ""
+            else:
+                summary = _generate_summary_from_hits(query, hits)
+                source_block = citations_text(hits)
+                if source_block and summary:
+                    summary = f"{summary}{source_block}"
+                elif source_block:
+                    summary = source_block.strip()
+                hits_for_summary = hits
+        else:
+            summary = _generate_summary_from_hits(query, hits)
+            source_block = citations_text(hits)
+            if source_block and summary:
+                summary = f"{summary}{source_block}"
+            elif source_block:
+                summary = source_block.strip()
+            hits_for_summary = hits
+
         by_path: dict[str, dict[str, Any]] = {}
-        for hit in hits:
+        for hit in hits_for_summary:
             clean_path = hit.path.lstrip("/")
             existing = by_path.get(clean_path)
             if existing is None or hit.score > existing["score"]:
@@ -331,19 +531,24 @@ def search_documents(workspace_id: str, query: str, session_id: str) -> dict[str
                     "status": matched_doc.get("status"),
                 }
         results = sorted(by_path.values(), key=lambda item: item["score"], reverse=True)
-        summary = _generate_summary_from_hits(query, hits)
-        source_block = citations_text(hits)
-        if source_block and summary:
-            summary = f"{summary}{source_block}"
-        elif source_block:
-            summary = source_block.strip()
+        if not summary:
+            summary = source_block.strip() if source_block else ""
         response_payload = {
             "results": results,
             "message": f"Found {len(results)} relevant document(s).",
             "summary": summary,
         }
-        _log_interaction(interaction_id, session_id, timestamp, request_payload, response_payload)
-        return {"interaction_id": interaction_id, **response_payload}
+        trace_metadata = {"retrieval": {"mode": "rag", "hits": [_hit_trace(hit) for hit in hits_for_summary]}}
+        paths = _log_interaction(
+            workspace_id,
+            interaction_id,
+            session_id,
+            timestamp,
+            request_payload,
+            response_payload,
+            trace_metadata,
+        )
+        return {"interaction_id": interaction_id, **paths, **response_payload}
 
     user_prompt = _build_user_prompt(query, documents)
     error_message = ""
@@ -397,37 +602,48 @@ def search_documents(workspace_id: str, query: str, session_id: str) -> dict[str
         message = "No documents matched your query. Try rephrasing."
 
     response_payload = {"results": results, "message": message, "summary": summary}
-    _log_interaction(interaction_id, session_id, timestamp, request_payload, response_payload)
+    trace_metadata = {
+        "retrieval": {
+            "mode": "selector",
+            "document_count": len(documents),
+            "selected_results": response_payload.get("results", []),
+        },
+        "error": error_message or None,
+    }
+    paths = _log_interaction(
+        workspace_id,
+        interaction_id,
+        session_id,
+        timestamp,
+        request_payload,
+        response_payload,
+        trace_metadata,
+    )
 
-    return {"interaction_id": interaction_id, **response_payload}
+    return {"interaction_id": interaction_id, **paths, **response_payload}
 
 
 def _log_interaction(
+    workspace_id: str,
     interaction_id: str,
     session_id: str,
     timestamp: str,
     request_payload: dict,
     response_payload: dict,
+    trace_metadata: dict[str, Any] | None = None,
 ):
-    """Write interaction JSON locally, then upload to GCS in a background thread."""
-    _ensure_ir_dir()
+    """Persist chat and trace records through the workspace storage path."""
+    trace_path = f"{workspace_prefix(workspace_id)}.traces/{interaction_id}.json"
+    chat_path = _upsert_chat(workspace_id, session_id, timestamp, request_payload, response_payload)
 
-    interaction_record = {
+    trace_record = {
         "interaction_id": interaction_id,
         "session_id": session_id,
         "timestamp": timestamp,
+        "workspace_id": workspace_id,
         "request": request_payload,
         "response": response_payload,
+        "trace": trace_metadata or {},
     }
-
-    local_path = IR_LOCAL_DIR / f"{interaction_id}.json"
-    local_path.write_text(json.dumps(interaction_record, indent=2, default=str), encoding="utf-8")
-
-    gcs_key = f"{IR_FOLDER}/{session_id}/{interaction_id}.json"
-    thread = threading.Thread(
-        target=_upload_interaction_async,
-        args=(local_path, gcs_key),
-        daemon=True,
-        name=f"ir-upload-{interaction_id[:8]}",
-    )
-    thread.start()
+    write_json_blob(trace_path, trace_record)
+    return {"chat_path": chat_path, "trace_path": trace_path}

@@ -47,6 +47,12 @@ class TestCreateWorkspace:
         assert data["name"] == "My Workspace"
         assert data["status"] == "active"
         assert "id" in data
+        prefix = workspace_prefix(data["id"])
+        assert local_cache.exists(f"{prefix}.comments/.keep")
+        assert local_cache.exists(f"{prefix}.chats/.keep")
+        assert local_cache.exists(f"{prefix}.traces/.keep")
+        assert local_cache.exists(f"{prefix}.requests/.keep")
+        assert local_cache.exists(f"{prefix}.roadmaps/.keep")
 
     @pytest.mark.asyncio
     async def test_slug_generation(self, client: AsyncClient):

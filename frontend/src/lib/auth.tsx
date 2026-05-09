@@ -9,10 +9,11 @@ import {
   useState,
 } from "react";
 
-interface User {
+export interface User {
   email: string;
   name: string;
   picture: string;
+  role?: "ADMIN" | "CLIENT" | "INVARIANT";
 }
 
 interface AuthContextValue {
@@ -78,7 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const savedToken = localStorage.getItem(TOKEN_KEY);
     if (!savedToken) {
-      setLoading(false);
+      queueMicrotask(() => setLoading(false));
       return;
     }
     fetchMe(savedToken)
