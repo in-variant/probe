@@ -32,6 +32,14 @@ def _require_invariant_or_admin(request: Request) -> dict[str, Any]:
     return session
 
 
+def _require_roadmap_viewer(request: Request) -> dict[str, Any]:
+    session = get_current_user(request)
+    role = str(session.get("role", "")).upper()
+    if role not in ("INVARIANT", "ADMIN", "CLIENT"):
+        raise HTTPException(403, "Compliance roadmap is only available to workspace members")
+    return session
+
+
 class RoadmapTaskModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -108,7 +116,7 @@ def _normalize_payload(body: ComplianceRoadmapPayload) -> dict[str, Any]:
 
 @router.get("/workspaces/{workspace_id}/compliance-roadmap", response_model=ComplianceRoadmapOut)
 async def get_compliance_roadmap(workspace_id: str, request: Request):
-    _require_invariant_or_admin(request)
+    _require_roadmap_viewer(request)
     from routers.documents import _ensure_workspace
 
     _ensure_workspace(workspace_id)

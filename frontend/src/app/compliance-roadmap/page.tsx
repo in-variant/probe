@@ -298,10 +298,20 @@ export default function ComplianceRoadmapPage() {
   const [linkDraft, setLinkDraft] = useState<Record<string, string>>({});
   const [assignableMembers, setAssignableMembers] = useState<string[]>([]);
 
-  const allowed = user?.role === "INVARIANT" || user?.role === "ADMIN";
+  const canView = user?.role === "INVARIANT" || user?.role === "ADMIN" || user?.role === "CLIENT";
+  const canEdit = user?.role === "INVARIANT" || user?.role === "ADMIN";
+
+  useEffect(() => {
+    if (!user) return;
+    if (user.role === "CLIENT") {
+      setPanelView("gantt");
+    } else {
+      setPanelView("table");
+    }
+  }, [user]);
 
   const loadRoadmap = useCallback(async () => {
-    if (!workspaceId || !allowed) return;
+    if (!workspaceId || !canView) return;
     setLoading(true);
     setLoadError("");
     try {
@@ -316,10 +326,10 @@ export default function ComplianceRoadmapPage() {
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, allowed]);
+  }, [workspaceId, canView]);
 
   useEffect(() => {
-    if (authLoading || !user || !allowed) return;
+    if (authLoading || !user || !canView) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -340,17 +350,17 @@ export default function ComplianceRoadmapPage() {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, user, allowed]);
+  }, [authLoading, user, canView]);
 
   useEffect(() => {
-    if (!workspaceId || !allowed) return;
+    if (!workspaceId || !canView) return;
     queueMicrotask(() => void loadRoadmap());
-  }, [workspaceId, allowed, loadRoadmap]);
+  }, [workspaceId, canView, loadRoadmap]);
 
   const ganttTasks = useMemo(() => roadmapToGanttTasks(phases), [phases]);
 
   const save = async () => {
-    if (!workspaceId) return;
+    if (!workspaceId || !canEdit) return;
     setSaving(true);
     try {
       const body = { phases: sortPhases(phases) };
@@ -396,7 +406,7 @@ export default function ComplianceRoadmapPage() {
     );
   }
 
-  if (!allowed) {
+  if (!canView) {
     return (
       <div className="mx-auto max-w-lg rounded-xl border border-zinc-200 bg-white px-6 py-10 text-center shadow-sm">
         <MapPinned className="mx-auto h-10 w-10 text-zinc-400" />
@@ -461,15 +471,21 @@ export default function ComplianceRoadmapPage() {
               <MapPinned className="h-4 w-4" />
               Gantt
             </button>
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={saving || !workspaceId}
-              className="inline-flex items-center gap-2 rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-zinc-800 disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save
-            </button>
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={() => void save()}
+                disabled={saving || !workspaceId}
+                className="inline-flex items-center gap-2 rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-zinc-800 disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Save
+              </button>
+            ) : (
+              <span className="inline-flex items-center rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-medium text-zinc-600">
+                Read-only view
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -501,7 +517,7 @@ export default function ComplianceRoadmapPage() {
               <Gantt
                 tasks={ganttTasks}
                 viewMode={ViewMode.Week}
-                onDateChange={onGanttDateChange}
+                onDateChange={canEdit ? onGanttDateChange : undefined}
                 listCellWidth="200px"
                 columnWidth={60}
                 ganttHeight={440}
@@ -514,18 +530,20 @@ export default function ComplianceRoadmapPage() {
         </div>
       ) : (
         <div className="mt-4 space-y-4">
-          <button
-            type="button"
-            onClick={() => {
-              const sorted = sortPhases(phases);
-              const nextOrder = sorted.length ? Math.max(...sorted.map((p) => p.order)) + 1 : 0;
-              setPhases([...phases, newPhase(nextOrder)]);
-            }}
-            className="inline-flex items-center gap-2 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
-          >
-            <Plus className="h-4 w-4" />
-            Add phase
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => {
+                const sorted = sortPhases(phases);
+                const nextOrder = sorted.length ? Math.max(...sorted.map((p) => p.order)) + 1 : 0;
+                setPhases([...phases, newPhase(nextOrder)]);
+              }}
+              className="inline-flex items-center gap-2 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
+            >
+              <Plus className="h-4 w-4" />
+              Add phase
+            </button>
+          )}
 
           {sortPhases(phases).map((phase, phaseIdx) => {
             const accent = PHASE_ACCENTS[phaseIdx % PHASE_ACCENTS.length];
@@ -558,10 +576,11 @@ export default function ComplianceRoadmapPage() {
                       prev.map((p) => (p.id === phase.id ? { ...p, name: e.target.value } : p)),
                     )
                   }
-                  className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-900"
+                  disabled={!canEdit}
+                  className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 disabled:bg-zinc-50 disabled:text-zinc-600"
                   placeholder="Phase name"
                 />
-                <div className="flex flex-wrap items-center gap-2">
+                {canEdit && <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
@@ -603,7 +622,7 @@ export default function ComplianceRoadmapPage() {
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
-                </div>
+                </div>}
               </div>
 
               <div className="divide-y divide-zinc-100">
@@ -627,7 +646,8 @@ export default function ComplianceRoadmapPage() {
                               ),
                             )
                           }
-                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-900"
+                          disabled={!canEdit}
+                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-900 disabled:bg-zinc-50 disabled:text-zinc-600"
                           placeholder="Task title"
                         />
                         <textarea
@@ -647,7 +667,8 @@ export default function ComplianceRoadmapPage() {
                             )
                           }
                           rows={2}
-                          className="w-full resize-y rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-800"
+                          disabled={!canEdit}
+                          className="w-full resize-y rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-800 disabled:bg-zinc-50 disabled:text-zinc-600"
                           placeholder="Description"
                         />
                         <div className="flex flex-wrap gap-2">
@@ -670,7 +691,8 @@ export default function ComplianceRoadmapPage() {
                                   ),
                                 )
                               }
-                              className="rounded border border-zinc-200 px-2 py-1 text-sm"
+                              disabled={!canEdit}
+                              className="rounded border border-zinc-200 px-2 py-1 text-sm disabled:bg-zinc-50 disabled:text-zinc-600"
                             />
                           </label>
                           <label className="flex items-center gap-1 text-xs text-zinc-600">
@@ -692,7 +714,8 @@ export default function ComplianceRoadmapPage() {
                                   ),
                                 )
                               }
-                              className="rounded border border-zinc-200 px-2 py-1 text-sm"
+                              disabled={!canEdit}
+                              className="rounded border border-zinc-200 px-2 py-1 text-sm disabled:bg-zinc-50 disabled:text-zinc-600"
                             />
                           </label>
                           <label className="flex items-center gap-1 text-xs text-zinc-600">
@@ -713,7 +736,8 @@ export default function ComplianceRoadmapPage() {
                                   ),
                                 )
                               }
-                              className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
+                              disabled={!canEdit}
+                              className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 disabled:bg-zinc-50 disabled:text-zinc-600"
                             >
                               <option value="">Unassigned</option>
                               {assignableMembers.map((email) => (
@@ -741,13 +765,15 @@ export default function ComplianceRoadmapPage() {
                               {fp.split("/").pop() || fp}
                             </button>
                           ))}
-                          <button
-                            type="button"
-                            onClick={() => setPicker({ phaseId: phase.id, taskId: task.id })}
-                            className="rounded-md border border-dashed border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 hover:bg-zinc-50"
-                          >
-                            + File
-                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => setPicker({ phaseId: phase.id, taskId: task.id })}
+                              className="rounded-md border border-dashed border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 hover:bg-zinc-50"
+                            >
+                              + File
+                            </button>
+                          )}
                         </div>
                         <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
                           Links
@@ -773,8 +799,10 @@ export default function ComplianceRoadmapPage() {
                               setLinkDraft((d) => ({ ...d, [task.id]: e.target.value }))
                             }
                             placeholder="https://…"
-                            className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs"
+                            disabled={!canEdit}
+                            className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs disabled:bg-zinc-50 disabled:text-zinc-600"
                             onKeyDown={(e) => {
+                              if (!canEdit) return;
                               if (e.key !== "Enter") return;
                               e.preventDefault();
                               const raw = (linkDraft[task.id] ?? "").trim();
@@ -799,7 +827,7 @@ export default function ComplianceRoadmapPage() {
                             }}
                           />
                         </div>
-                        <div className="flex flex-wrap gap-2 pt-1">
+                        {canEdit && <div className="flex flex-wrap gap-2 pt-1">
                           <button
                             type="button"
                             className="rounded border border-zinc-200 px-2 py-0.5 text-xs text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
@@ -843,7 +871,7 @@ export default function ComplianceRoadmapPage() {
                           >
                             Remove task
                           </button>
-                        </div>
+                        </div>}
                       </div>
                     </div>
                   </div>

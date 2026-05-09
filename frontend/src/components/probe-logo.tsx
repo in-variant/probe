@@ -42,19 +42,16 @@ export function ProbeLogo({ size = "default" }: { size?: "default" | "lg" }) {
           </clipPath>
         </defs>
 
-        {/* Document pages (back to front) */}
         <rect x={4} y={5} width={15} height={19} rx={2} className="fill-zinc-100 stroke-zinc-300" strokeWidth={0.6} />
         <rect x={2.5} y={3} width={15} height={19} rx={2} className="fill-zinc-50 stroke-zinc-300" strokeWidth={0.7} />
         <rect x={1} y={1} width={15} height={19} rx={2} className="fill-white stroke-zinc-400" strokeWidth={0.8} />
 
-        {/* Text lines on front doc */}
         <line x1={4} y1={5.5} x2={12} y2={5.5} className="stroke-zinc-300" strokeWidth={1} strokeLinecap="round" />
         <line x1={4} y1={8.5} x2={13} y2={8.5} className="stroke-zinc-200" strokeWidth={1} strokeLinecap="round" />
         <line x1={4} y1={11.5} x2={10.5} y2={11.5} className="stroke-zinc-200" strokeWidth={1} strokeLinecap="round" />
         <line x1={4} y1={14.5} x2={12.5} y2={14.5} className="stroke-zinc-200" strokeWidth={1} strokeLinecap="round" />
         <line x1={4} y1={17.5} x2={9} y2={17.5} className="stroke-zinc-200" strokeWidth={1} strokeLinecap="round" />
 
-        {/* Magnifying glass lens */}
         <circle
           cx={21.5}
           cy={14}
@@ -64,7 +61,6 @@ export function ProbeLogo({ size = "default" }: { size?: "default" | "lg" }) {
           fill="none"
         />
 
-        {/* Inner focus ring */}
         <circle
           cx={21.5}
           cy={14}
@@ -74,10 +70,8 @@ export function ProbeLogo({ size = "default" }: { size?: "default" | "lg" }) {
           className="stroke-zinc-900 animate-probe-pulse"
         />
 
-        {/* Scan lines inside lens */}
         <ScanLines />
 
-        {/* Handle */}
         <line
           x1={26.2}
           y1={18.8}

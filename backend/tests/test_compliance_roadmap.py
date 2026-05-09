@@ -31,7 +31,7 @@ def _seed_ws(ws_id: str):
 
 
 @pytest.mark.asyncio
-async def test_client_forbidden(client: AsyncClient):
+async def test_client_can_view_but_cannot_patch(client: AsyncClient):
     _seed_ws("ws-cr")
     AUTH_SESSION_STORE["cl-cr"] = {
         "email": "c@example.com",
@@ -39,8 +39,14 @@ async def test_client_forbidden(client: AsyncClient):
         "picture": "",
         "role": "CLIENT",
     }
-    resp = await client.get("/api/workspaces/ws-cr/compliance-roadmap", headers=_headers("cl-cr"))
-    assert resp.status_code == 403
+    get_resp = await client.get("/api/workspaces/ws-cr/compliance-roadmap", headers=_headers("cl-cr"))
+    assert get_resp.status_code == 200
+    patch_resp = await client.patch(
+        "/api/workspaces/ws-cr/compliance-roadmap",
+        headers=_headers("cl-cr"),
+        json={"phases": []},
+    )
+    assert patch_resp.status_code == 403
 
 
 @pytest.mark.asyncio
