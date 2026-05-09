@@ -146,7 +146,10 @@ def _read_roles(*, force_refresh: bool = False) -> dict[str, Any]:
 
     global _roles_cache_data, _roles_cache_ts
     if not force_refresh and _roles_cache_data is not None and time.monotonic() - _roles_cache_ts < ROLES_CACHE_TTL_SEC:
-        return _roles_cache_data
+        # In tests, local_cache root changes per test. If roles.json is absent in the
+        # current cache root, do not serve stale in-memory cache; rebuild from storage.
+        if read_json_blob(ROLES_PATH) is not None:
+            return _roles_cache_data
 
     existing_data = read_json_blob(ROLES_PATH)
     data = existing_data or _default_roles()
