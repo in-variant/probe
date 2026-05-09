@@ -564,6 +564,23 @@ export async function uploadAndExtractZip(
 
 // ── Document requests (Invariant ↔ Client) ─────────────────────
 
+export interface RequestComment {
+  id: string;
+  author_email: string;
+  author_name: string;
+  body: string;
+  created_at: string;
+  replies: RequestCommentReply[];
+}
+
+export interface RequestCommentReply {
+  id: string;
+  author_email: string;
+  author_name: string;
+  body: string;
+  created_at: string;
+}
+
 export interface DocumentRequest {
   id: string;
   created_by_email: string;
@@ -573,9 +590,12 @@ export interface DocumentRequest {
   body: string;
   desired_path: string;
   status: string;
+  assignee_email?: string | null;
+  assignee_name?: string | null;
   fulfilled_by_email?: string | null;
   fulfilled_at?: string | null;
   stored_path?: string | null;
+  comments?: RequestComment[];
 }
 
 export async function listDocumentRequests(workspaceId: string): Promise<DocumentRequest[]> {
@@ -584,7 +604,7 @@ export async function listDocumentRequests(workspaceId: string): Promise<Documen
 
 export async function createDocumentRequest(
   workspaceId: string,
-  payload: { title: string; body?: string; desired_path?: string },
+  payload: { title: string; body?: string; desired_path?: string; assignee_email?: string },
 ): Promise<DocumentRequest> {
   return request(`/api/workspaces/${workspaceId}/document-requests`, {
     method: "POST",
@@ -596,6 +616,12 @@ export async function createDocumentRequest(
 export async function cancelDocumentRequest(workspaceId: string, requestId: string): Promise<void> {
   await request(`/api/workspaces/${workspaceId}/document-requests/${requestId}`, {
     method: "PATCH",
+  });
+}
+
+export async function deleteDocumentRequest(workspaceId: string, requestId: string): Promise<void> {
+  await request(`/api/workspaces/${workspaceId}/document-requests/${requestId}`, {
+    method: "DELETE",
   });
 }
 
@@ -621,6 +647,53 @@ export async function fulfillDocumentRequest(
     throw new Error(`API error ${res.status}: ${body}`);
   }
   return res.json();
+}
+
+export async function assignDocumentRequest(
+  workspaceId: string,
+  requestId: string,
+  assigneeEmail: string | null,
+): Promise<DocumentRequest> {
+  return request(`/api/workspaces/${workspaceId}/document-requests/${requestId}/assign`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ assignee_email: assigneeEmail }),
+  });
+}
+
+export async function listRequestComments(
+  workspaceId: string,
+  requestId: string,
+): Promise<{ comments: RequestComment[] }> {
+  return request(`/api/workspaces/${workspaceId}/document-requests/${requestId}/comments`);
+}
+
+export async function createRequestComment(
+  workspaceId: string,
+  requestId: string,
+  body: string,
+): Promise<RequestComment> {
+  return request(`/api/workspaces/${workspaceId}/document-requests/${requestId}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function replyToRequestComment(
+  workspaceId: string,
+  requestId: string,
+  commentId: string,
+  body: string,
+): Promise<RequestCommentReply> {
+  return request(
+    `/api/workspaces/${workspaceId}/document-requests/${requestId}/comments/${commentId}/replies`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    },
+  );
 }
 
 // ── Compliance roadmap (INVARIANT + ADMIN) ───────────────────────

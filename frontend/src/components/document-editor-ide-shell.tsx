@@ -1337,7 +1337,7 @@ export function DocumentEditorIdeShell() {
             <div className="space-y-3">
               {chatTurns.map((turn) => (
                 <div key={turn.id} className="space-y-2">
-                  <div className="ml-auto max-w-[90%] rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">
+                  <div className="dark-bubble ml-auto max-w-[90%] rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">
                     {turn.query}
                   </div>
                   {turn.tools.length > 0 && (
@@ -1354,7 +1354,7 @@ export function DocumentEditorIdeShell() {
                               <p className="font-medium text-zinc-800">{tool.label}</p>
                               <p className="truncate text-zinc-500">{tool.detail}</p>
                               {tool.diff && (
-                                <pre className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md bg-zinc-950 p-2 font-mono text-[10px] leading-4 text-zinc-100 [scrollbar-width:thin]">
+                                <pre className="dark-bubble mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md bg-zinc-950 p-2 font-mono text-[10px] leading-4 text-zinc-100 [scrollbar-width:thin]">
                                   {tool.diff}
                                 </pre>
                               )}
@@ -1371,7 +1371,7 @@ export function DocumentEditorIdeShell() {
                         Generating answer...
                       </div>
                     ) : turn.summary ? (
-                      <article className="prose prose-zinc max-w-none text-xs leading-5 prose-headings:mb-1.5 prose-headings:mt-3 prose-headings:text-sm prose-headings:font-semibold prose-p:my-2 prose-p:leading-5 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-strong:font-semibold prose-hr:my-3 prose-table:block prose-table:max-w-full prose-th:border prose-th:border-zinc-200 prose-th:px-2 prose-th:py-1 prose-td:border prose-td:border-zinc-200 prose-td:px-2 prose-td:py-1">
+                      <article className="prose prose-zinc max-w-none cursor-text text-xs leading-5 prose-headings:mb-1.5 prose-headings:mt-3 prose-headings:text-sm prose-headings:font-semibold prose-p:my-2 prose-p:leading-5 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-strong:font-semibold prose-hr:my-3 prose-table:block prose-table:max-w-full prose-th:border prose-th:border-zinc-200 prose-th:px-2 prose-th:py-1 prose-td:border prose-td:border-zinc-200 prose-td:px-2 prose-td:py-1">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           components={{

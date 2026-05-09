@@ -250,7 +250,7 @@ function FilePickerModal({ workspaceId, onClose, onPick }: FilePickerProps) {
                 <li key={file.path}>
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-zinc-800 hover:bg-violet-50"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-zinc-800 hover:bg-zinc-100"
                     onClick={() => {
                       onPick(file.path);
                       onClose();
@@ -456,7 +456,7 @@ export default function ComplianceRoadmapPage() {
               type="button"
               onClick={() => void save()}
               disabled={saving || !workspaceId}
-              className="inline-flex items-center gap-2 rounded-lg border border-violet-600 bg-violet-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-zinc-800 disabled:opacity-50"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Save
@@ -698,7 +698,7 @@ export default function ComplianceRoadmapPage() {
                               key={fp}
                               type="button"
                               onClick={() => void openFile(fp)}
-                              className="max-w-full truncate rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs text-violet-900 hover:bg-violet-100"
+                              className="max-w-full truncate rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs text-zinc-900 hover:bg-zinc-100"
                               title={fp}
                             >
                               {fp.split("/").pop() || fp}

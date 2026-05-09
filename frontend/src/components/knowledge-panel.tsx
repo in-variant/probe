@@ -153,7 +153,7 @@ function ConversationView({
             {tab.interactions.map((interaction) => (
               <div key={interaction.id} className="space-y-2">
                 <div className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-zinc-900 px-3.5 py-2 text-[13px] leading-relaxed text-white">
+                  <div className="dark-bubble max-w-[85%] rounded-2xl rounded-tr-md bg-zinc-900 px-3.5 py-2 text-[13px] leading-relaxed text-white">
                     {interaction.query}
                   </div>
                 </div>
@@ -164,7 +164,7 @@ function ConversationView({
                   </span>
                   <div className="min-w-0 flex-1">
                     {interaction.summary && (
-                      <div className="prose prose-sm prose-zinc mb-2 max-w-none text-[13px] leading-relaxed">
+                      <div className="prose prose-sm prose-zinc mb-2 max-w-none cursor-text text-[13px] leading-relaxed">
                         <ReactMarkdown>{interaction.summary}</ReactMarkdown>
                       </div>
                     )}

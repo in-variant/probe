@@ -6,7 +6,7 @@ import re
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from rag.jobs import enqueue_index
@@ -66,6 +66,24 @@ class DocumentRequestCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     body: str = Field(default="", max_length=8000)
     desired_path: str | None = Field(default=None, max_length=1024)
+    assignee_email: str | None = Field(default=None, max_length=320)
+
+
+class DocumentRequestAssign(BaseModel):
+    assignee_email: str | None = Field(default=None, max_length=320)
+
+
+class RequestCommentCreate(BaseModel):
+    body: str = Field(..., min_length=1, max_length=8000)
+
+
+class RequestCommentOut(BaseModel):
+    id: str
+    author_email: str
+    author_name: str
+    body: str
+    created_at: str
+    replies: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DocumentRequestOut(BaseModel):
@@ -77,10 +95,13 @@ class DocumentRequestOut(BaseModel):
     body: str
     desired_path: str
     status: str
+    assignee_email: str | None = None
+    assignee_name: str | None = None
     fulfilled_by_email: str | None = None
     fulfilled_at: str | None = None
     stored_path: str | None = None
     updated_at: str | None = None
+    comments: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"extra": "ignore"}
 
@@ -104,7 +125,7 @@ async def create_document_request(workspace_id: str, body: DocumentRequestCreate
     desired = _sanitize_relative_path(body.desired_path) if body.desired_path else ""
     session = get_current_user(request)
     ts = now_iso()
-    rec = {
+    rec: dict[str, Any] = {
         "id": str(uuid.uuid4()),
         "created_by_email": str(session.get("email", "")),
         "created_by_name": str(session.get("name", "")),
@@ -113,9 +134,12 @@ async def create_document_request(workspace_id: str, body: DocumentRequestCreate
         "body": body.body.strip(),
         "desired_path": desired,
         "status": "open",
+        "assignee_email": body.assignee_email or None,
+        "assignee_name": None,
         "fulfilled_by_email": None,
         "fulfilled_at": None,
         "stored_path": None,
+        "comments": [],
     }
     items = _read_requests(workspace_id)
     items.append(rec)
@@ -148,6 +172,25 @@ async def cancel_document_request(workspace_id: str, request_id: str, request: R
         raise HTTPException(404, "Request not found")
     _write_requests(workspace_id, items)
     return {"ok": True}
+
+
+@router.delete("/workspaces/{workspace_id}/document-requests/{request_id}")
+async def delete_document_request(workspace_id: str, request_id: str, request: Request):
+    session = get_current_user(request)
+    from routers.documents import _ensure_workspace
+
+    _ensure_workspace(workspace_id)
+    items = _read_requests(workspace_id)
+    email = str(session.get("email", "")).lower()
+    for i, item in enumerate(items):
+        if not isinstance(item, dict) or item.get("id") != request_id:
+            continue
+        if str(item.get("created_by_email", "")).lower() != email:
+            raise HTTPException(403, "Only the requestor can delete this request")
+        items.pop(i)
+        _write_requests(workspace_id, items)
+        return {"ok": True}
+    raise HTTPException(404, "Request not found")
 
 
 @router.post("/workspaces/{workspace_id}/document-requests/{request_id}/fulfill")
@@ -217,3 +260,113 @@ async def fulfill_document_request(
     await file.close()
     _update_workspace_counts(workspace_id)
     return {"stored_path": rel_path, "request": DocumentRequestOut(**target)}
+
+
+# ── Assignee ───────────────────────────────────────────────────────
+
+@router.patch("/workspaces/{workspace_id}/document-requests/{request_id}/assign")
+async def assign_document_request(
+    workspace_id: str, request_id: str, body: DocumentRequestAssign, request: Request,
+):
+    get_current_user(request)
+    from routers.documents import _ensure_workspace
+
+    _ensure_workspace(workspace_id)
+    items = _read_requests(workspace_id)
+    for item in items:
+        if not isinstance(item, dict) or item.get("id") != request_id:
+            continue
+        item["assignee_email"] = body.assignee_email or None
+        item["assignee_name"] = None
+        item["updated_at"] = now_iso()
+        _write_requests(workspace_id, items)
+        return DocumentRequestOut(**item)
+    raise HTTPException(404, "Request not found")
+
+
+# ── Comments & replies ─────────────────────────────────────────────
+
+@router.get("/workspaces/{workspace_id}/document-requests/{request_id}/comments")
+async def list_request_comments(workspace_id: str, request_id: str, request: Request):
+    get_current_user(request)
+    from routers.documents import _ensure_workspace
+
+    _ensure_workspace(workspace_id)
+    items = _read_requests(workspace_id)
+    for item in items:
+        if isinstance(item, dict) and item.get("id") == request_id:
+            return {"comments": item.get("comments", [])}
+    raise HTTPException(404, "Request not found")
+
+
+@router.post("/workspaces/{workspace_id}/document-requests/{request_id}/comments", status_code=201)
+async def create_request_comment(
+    workspace_id: str, request_id: str, body: RequestCommentCreate, request: Request,
+):
+    session = get_current_user(request)
+    from routers.documents import _ensure_workspace
+
+    _ensure_workspace(workspace_id)
+    items = _read_requests(workspace_id)
+    for item in items:
+        if not isinstance(item, dict) or item.get("id") != request_id:
+            continue
+        comment: dict[str, Any] = {
+            "id": str(uuid.uuid4()),
+            "author_email": str(session.get("email", "")),
+            "author_name": str(session.get("name", "")),
+            "body": body.body.strip(),
+            "created_at": now_iso(),
+            "replies": [],
+        }
+        comments = item.get("comments")
+        if not isinstance(comments, list):
+            comments = []
+            item["comments"] = comments
+        comments.append(comment)
+        item["updated_at"] = now_iso()
+        _write_requests(workspace_id, items)
+        return comment
+    raise HTTPException(404, "Request not found")
+
+
+@router.post(
+    "/workspaces/{workspace_id}/document-requests/{request_id}/comments/{comment_id}/replies",
+    status_code=201,
+)
+async def reply_to_request_comment(
+    workspace_id: str,
+    request_id: str,
+    comment_id: str,
+    body: RequestCommentCreate,
+    request: Request,
+):
+    session = get_current_user(request)
+    from routers.documents import _ensure_workspace
+
+    _ensure_workspace(workspace_id)
+    items = _read_requests(workspace_id)
+    for item in items:
+        if not isinstance(item, dict) or item.get("id") != request_id:
+            continue
+        comments = item.get("comments", [])
+        for comment in comments:
+            if not isinstance(comment, dict) or comment.get("id") != comment_id:
+                continue
+            reply: dict[str, Any] = {
+                "id": str(uuid.uuid4()),
+                "author_email": str(session.get("email", "")),
+                "author_name": str(session.get("name", "")),
+                "body": body.body.strip(),
+                "created_at": now_iso(),
+            }
+            replies = comment.get("replies")
+            if not isinstance(replies, list):
+                replies = []
+                comment["replies"] = replies
+            replies.append(reply)
+            item["updated_at"] = now_iso()
+            _write_requests(workspace_id, items)
+            return reply
+        raise HTTPException(404, "Comment not found")
+    raise HTTPException(404, "Request not found")

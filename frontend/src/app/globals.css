@@ -92,7 +92,7 @@
     line-height: 1.6;
   }
   ::selection {
-    background: #0d0d0d;
+    background: #3b82f6;
     color: #fff;
   }
 }
@@ -114,6 +114,11 @@
   .heading-editorial {
     @apply font-semibold tracking-[-0.02em] text-zinc-900;
   }
+}
+
+.dark-bubble ::selection {
+  background: #93c5fd;
+  color: #0f172a;
 }
 
 @keyframes pulse-gentle {
