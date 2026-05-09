@@ -9,8 +9,10 @@ import {
   ADMIN_WIPE_CHROMA_PHRASE,
   adminReindexWorkspace,
   adminWipeChroma,
+  getChromaDiagnostics,
   getKnowledgeBaseStatus,
   listWorkspaces,
+  type ChromaDiagnostics,
   type KnowledgeBaseStatus,
   type Workspace,
 } from "@/lib/api";
@@ -24,6 +26,7 @@ function AdminSettingsContent() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string>("");
   const [kbStatus, setKbStatus] = useState<KnowledgeBaseStatus | null>(null);
+  const [chromaDiagnostics, setChromaDiagnostics] = useState<ChromaDiagnostics | null>(null);
   const [ragBusy, setRagBusy] = useState(false);
   const [ragMessage, setRagMessage] = useState("");
 
@@ -56,6 +59,18 @@ function AdminSettingsContent() {
     }
   }, [workspaceId]);
 
+  const refreshDiagnostics = useCallback(async () => {
+    if (!workspaceId) {
+      setChromaDiagnostics(null);
+      return;
+    }
+    try {
+      setChromaDiagnostics(await getChromaDiagnostics(workspaceId));
+    } catch {
+      setChromaDiagnostics(null);
+    }
+  }, [workspaceId]);
+
   useEffect(() => {
     if (!loading && user?.role === "ADMIN") {
       void refreshWorkspaces();
@@ -64,10 +79,14 @@ function AdminSettingsContent() {
 
   useEffect(() => {
     void refreshKb();
+    void refreshDiagnostics();
     if (!workspaceId) return;
-    const t = setInterval(() => void refreshKb(), 5000);
+    const t = setInterval(() => {
+      void refreshKb();
+      void refreshDiagnostics();
+    }, 5000);
     return () => clearInterval(t);
-  }, [workspaceId, refreshKb]);
+  }, [workspaceId, refreshDiagnostics, refreshKb]);
 
   async function runReindex() {
     if (!workspaceId) return;
@@ -77,6 +96,7 @@ function AdminSettingsContent() {
       const r = await adminReindexWorkspace(workspaceId);
       setRagMessage(`Reindex queued: ${r.enqueued} file job(s).`);
       await refreshKb();
+      await refreshDiagnostics();
     } catch (e) {
       setRagMessage(e instanceof Error ? e.message : "Reindex failed");
     } finally {
@@ -95,6 +115,7 @@ function AdminSettingsContent() {
       setWipeStep("none");
       setWipeTyped("");
       await refreshKb();
+      await refreshDiagnostics();
     } catch (e) {
       setRagMessage(e instanceof Error ? e.message : "Wipe failed");
     } finally {
@@ -182,6 +203,50 @@ function AdminSettingsContent() {
                 <span className="font-medium">{kbStatus.knowledge_base.indexed_chunk_count}</span> · Queue depth:{" "}
                 <span className="font-medium">{kbStatus.knowledge_base.queue_depth}</span>
               </p>
+            </div>
+          )}
+          {chromaDiagnostics && (
+            <div className="mt-3 grid gap-2 rounded-xl border border-zinc-100 bg-white p-3 text-xs text-zinc-700 md:grid-cols-2">
+              <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-2">
+                <p className="font-semibold text-zinc-900">Core health</p>
+                <p className="mt-1">State: {chromaDiagnostics.knowledge_base.state}</p>
+                <p>Chunks: {chromaDiagnostics.knowledge_base.indexed_chunk_count}</p>
+                <p>
+                  Queue: {chromaDiagnostics.knowledge_base.queue_depth} (pending {chromaDiagnostics.knowledge_base.pending_count}
+                  , running {chromaDiagnostics.knowledge_base.running_count})
+                </p>
+                <p>Processed: {chromaDiagnostics.knowledge_base.processed_count}</p>
+                <p>Failed: {chromaDiagnostics.knowledge_base.failed_count}</p>
+              </div>
+              <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-2">
+                <p className="font-semibold text-zinc-900">Collections</p>
+                <p>Total collections: {chromaDiagnostics.collections.count}</p>
+                <p>Workspace collection: {chromaDiagnostics.collections.workspace_collection_name}</p>
+                <p>Exists: {chromaDiagnostics.collections.workspace_collection_exists ? "Yes" : "No"}</p>
+                {chromaDiagnostics.collections.names.length > 0 && (
+                  <p className="mt-1 truncate" title={chromaDiagnostics.collections.names.join(", ")}>
+                    Names: {chromaDiagnostics.collections.names.join(", ")}
+                  </p>
+                )}
+              </div>
+              <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-2 md:col-span-2">
+                <p className="font-semibold text-zinc-900">Storage and diagnostics</p>
+                <p>Path: {chromaDiagnostics.storage.persist_path}</p>
+                <p>
+                  Disk used: {Math.round(chromaDiagnostics.storage.used_bytes / (1024 * 1024))}MB /{" "}
+                  {Math.round(chromaDiagnostics.storage.total_bytes / (1024 * 1024))}MB
+                </p>
+                {chromaDiagnostics.knowledge_base.last_error && (
+                  <p className="mt-1 text-red-700">
+                    Last error: {JSON.stringify(chromaDiagnostics.knowledge_base.last_error)}
+                  </p>
+                )}
+                {chromaDiagnostics.knowledge_base.recent.length > 0 && (
+                  <p className="mt-1 truncate" title={JSON.stringify(chromaDiagnostics.knowledge_base.recent[chromaDiagnostics.knowledge_base.recent.length - 1])}>
+                    Recent job: {JSON.stringify(chromaDiagnostics.knowledge_base.recent[chromaDiagnostics.knowledge_base.recent.length - 1])}
+                  </p>
+                )}
+              </div>
             </div>
           )}
 

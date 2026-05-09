@@ -152,6 +152,29 @@ export async function updateMemberRole(email: string, role: MemberRole): Promise
   });
 }
 
+export async function deleteMember(email: string): Promise<{ ok: boolean; email: string }> {
+  return request("/api/auth/members", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+}
+
+let _assignableMembersCache: { expiresAt: number; members: MemberRoleRecord[] } | null = null;
+const ASSIGNABLE_MEMBERS_TTL_MS = 10_000;
+
+export async function listAssignableMembers(forceRefresh = false): Promise<MemberRoleRecord[]> {
+  if (!forceRefresh && _assignableMembersCache && Date.now() < _assignableMembersCache.expiresAt) {
+    return _assignableMembersCache.members;
+  }
+  const data = await request<{ members: MemberRoleRecord[] }>("/api/auth/members/assignable");
+  _assignableMembersCache = {
+    expiresAt: Date.now() + ASSIGNABLE_MEMBERS_TTL_MS,
+    members: data.members,
+  };
+  return data.members;
+}
+
 // ── Documents API ──────────────────────────────────────────────
 
 export async function listDocuments(
@@ -354,6 +377,38 @@ export async function adminWipeChroma(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ confirmation: confirmationPhrase }),
   });
+}
+
+export interface ChromaDiagnostics {
+  workspace_id: string;
+  knowledge_base: {
+    state: "ready" | "indexing" | "error";
+    indexed_chunk_count: number;
+    queue_depth: number;
+    pending_count: number;
+    running_count: number;
+    processed_count: number;
+    failed_count: number;
+    last_error?: Record<string, unknown> | null;
+    recent: Array<Record<string, unknown>>;
+  };
+  collections: {
+    count: number;
+    workspace_collection_name: string;
+    workspace_collection_exists: boolean;
+    names: string[];
+  };
+  storage: {
+    persist_path: string;
+    total_bytes: number;
+    used_bytes: number;
+    free_bytes: number;
+  };
+}
+
+export async function getChromaDiagnostics(workspaceId: string): Promise<ChromaDiagnostics> {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  return request(`/api/admin/rag/diagnostics?${params}`);
 }
 
 export async function listFileComments(workspaceId: string, path: string): Promise<DocumentComment[]> {
@@ -706,6 +761,7 @@ export interface ComplianceRoadmapTask {
   end: string;
   file_paths: string[];
   links: string[];
+  assignee_email?: string | null;
 }
 
 export interface ComplianceRoadmapPhase {

@@ -42,6 +42,7 @@ class RoadmapTaskModel(BaseModel):
     end: str = Field(..., min_length=8, max_length=32)
     file_paths: list[str] = Field(default_factory=list, max_length=50)
     links: list[str] = Field(default_factory=list, max_length=50)
+    assignee_email: str | None = Field(default=None, max_length=320)
 
     @field_validator("file_paths")
     @classmethod
@@ -93,6 +94,7 @@ def _normalize_payload(body: ComplianceRoadmapPayload) -> dict[str, Any]:
                 "end": t.end.strip(),
                 "file_paths": list(t.file_paths),
                 "links": list(t.links),
+                "assignee_email": (t.assignee_email or "").strip().lower() or None,
             })
         phases_out.append({
             "id": pid,

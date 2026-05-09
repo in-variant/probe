@@ -25,8 +25,9 @@ import {
   deleteDocumentRequest,
   createRequestComment,
   fulfillDocumentRequest,
+  getDownloadUrl,
   listDocumentRequests,
-  listMembers,
+  listAssignableMembers,
   listRequestComments,
   replyToRequestComment,
   type DocumentRequest,
@@ -112,6 +113,7 @@ function RequestDetailModal({
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [uploadResult, setUploadResult] = useState<{ workspaceId: string; path: string } | null>(null);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const assigneeRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -202,13 +204,22 @@ function RequestDetailModal({
     if (!files?.length) return;
     setBusy(true);
     try {
-      await fulfillDocumentRequest(workspaceId, req.id, files[0]);
+      const result = await fulfillDocumentRequest(workspaceId, req.id, files[0]);
+      setUploadResult({ workspaceId, path: result.stored_path });
       onRefresh();
-      onClose();
     } catch {
       /* silent */
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function openUploadedFile(path: string) {
+    try {
+      const { url } = await getDownloadUrl(workspaceId, path);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      /* silent */
     }
   }
 
@@ -246,7 +257,7 @@ function RequestDetailModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
       <div
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl"
+        className="flex h-[60vh] min-h-[28rem] max-h-[60vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl"
         role="dialog"
         aria-modal="true"
       >
@@ -394,6 +405,21 @@ function RequestDetailModal({
                   <p className="mt-1 font-mono text-sm text-emerald-700">
                     {req.stored_path}
                   </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void openUploadedFile(req.stored_path!)}
+                      className="rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+                    >
+                      Open uploaded file
+                    </button>
+                    <a
+                      href={`/document-editor?workspace=${encodeURIComponent(workspaceId)}&file=${encodeURIComponent(req.stored_path)}`}
+                      className="rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+                    >
+                      Open in workspace editor
+                    </a>
+                  </div>
                 </div>
               ) : null}
 
@@ -418,6 +444,27 @@ function RequestDetailModal({
                       onChange={(ev) => void handleUpload(ev.target.files)}
                     />
                   </label>
+                </div>
+              )}
+              {uploadResult && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                  <p className="font-medium">Upload complete</p>
+                  <p className="mt-0.5 font-mono">{uploadResult.path}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md border border-emerald-300 bg-white px-2 py-1 font-medium text-emerald-800 hover:bg-emerald-100"
+                      onClick={() => void openUploadedFile(uploadResult.path)}
+                    >
+                      Open file
+                    </button>
+                    <a
+                      href={`/document-editor?workspace=${encodeURIComponent(uploadResult.workspaceId)}&file=${encodeURIComponent(uploadResult.path)}`}
+                      className="rounded-md border border-emerald-300 bg-white px-2 py-1 font-medium text-emerald-800 hover:bg-emerald-100"
+                    >
+                      Open in workspace editor
+                    </a>
+                  </div>
                 </div>
               )}
 
@@ -642,13 +689,11 @@ export default function RequestsPage() {
         if (!cancelled)
           setError(e instanceof Error ? e.message : "Failed to load");
       }
-      if (user.role === "ADMIN") {
-        try {
-          const membersRes = await listMembers();
-          if (!cancelled) setMembers(membersRes.members.filter((m) => m.allowed));
-        } catch {
-          /* non-admin or failed — assignee picker will be empty */
-        }
+      try {
+        const assignable = await listAssignableMembers();
+        if (!cancelled) setMembers(assignable.filter((m) => m.allowed));
+      } catch {
+        /* fallback to empty assignable list */
       }
     })();
     return () => {

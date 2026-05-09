@@ -6,11 +6,11 @@ import re
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from rag.jobs import enqueue_index
-from routers.auth import get_current_user
+from routers.auth import _member_for_email, get_current_user
 from storage import now_iso, read_json_blob, workspace_prefix, write_file_blob, write_json_blob
 
 router = APIRouter(tags=["document-requests"])
@@ -71,6 +71,16 @@ class DocumentRequestCreate(BaseModel):
 
 class DocumentRequestAssign(BaseModel):
     assignee_email: str | None = Field(default=None, max_length=320)
+
+
+def _validate_assignable(email: str | None) -> str | None:
+    if not email:
+        return None
+    candidate = str(email).strip().lower()
+    member = _member_for_email(candidate)
+    if not member or not bool(member.get("allowed", True)):
+        raise HTTPException(422, "Assignee must be an allowed member")
+    return candidate
 
 
 class RequestCommentCreate(BaseModel):
@@ -134,7 +144,7 @@ async def create_document_request(workspace_id: str, body: DocumentRequestCreate
         "body": body.body.strip(),
         "desired_path": desired,
         "status": "open",
-        "assignee_email": body.assignee_email or None,
+        "assignee_email": _validate_assignable(body.assignee_email),
         "assignee_name": None,
         "fulfilled_by_email": None,
         "fulfilled_at": None,
@@ -276,7 +286,7 @@ async def assign_document_request(
     for item in items:
         if not isinstance(item, dict) or item.get("id") != request_id:
             continue
-        item["assignee_email"] = body.assignee_email or None
+        item["assignee_email"] = _validate_assignable(body.assignee_email)
         item["assignee_name"] = None
         item["updated_at"] = now_iso()
         _write_requests(workspace_id, items)

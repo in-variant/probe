@@ -21,6 +21,7 @@ import { ViewMode } from "gantt-task-react";
 import {
   getComplianceRoadmap,
   getDownloadUrl,
+  listAssignableMembers,
   listDocuments,
   listWorkspaces,
   patchComplianceRoadmap,
@@ -71,6 +72,7 @@ function newTask(): ComplianceRoadmapTask {
     end,
     file_paths: [],
     links: [],
+    assignee_email: null,
   };
 }
 
@@ -294,6 +296,7 @@ export default function ComplianceRoadmapPage() {
   const [panelView, setPanelView] = useState<PanelView>("table");
   const [picker, setPicker] = useState<{ phaseId: string; taskId: string } | null>(null);
   const [linkDraft, setLinkDraft] = useState<Record<string, string>>({});
+  const [assignableMembers, setAssignableMembers] = useState<string[]>([]);
 
   const allowed = user?.role === "INVARIANT" || user?.role === "ADMIN";
 
@@ -326,6 +329,12 @@ export default function ComplianceRoadmapPage() {
         if (ws.length) setWorkspaceId((prev) => prev || ws[0].id);
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : "Failed to load workspaces");
+      }
+      try {
+        const members = await listAssignableMembers();
+        if (!cancelled) setAssignableMembers(members.filter((m) => m.allowed).map((m) => m.email));
+      } catch {
+        if (!cancelled) setAssignableMembers([]);
       }
     })();
     return () => {
@@ -685,6 +694,34 @@ export default function ComplianceRoadmapPage() {
                               }
                               className="rounded border border-zinc-200 px-2 py-1 text-sm"
                             />
+                          </label>
+                          <label className="flex items-center gap-1 text-xs text-zinc-600">
+                            Assignee
+                            <select
+                              value={task.assignee_email ?? ""}
+                              onChange={(e) =>
+                                setPhases((prev) =>
+                                  prev.map((p) =>
+                                    p.id === phase.id
+                                      ? {
+                                          ...p,
+                                          tasks: p.tasks.map((t) =>
+                                            t.id === task.id ? { ...t, assignee_email: e.target.value || null } : t,
+                                          ),
+                                        }
+                                      : p,
+                                  ),
+                                )
+                              }
+                              className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
+                            >
+                              <option value="">Unassigned</option>
+                              {assignableMembers.map((email) => (
+                                <option key={email} value={email}>
+                                  {email}
+                                </option>
+                              ))}
+                            </select>
                           </label>
                         </div>
                       </div>

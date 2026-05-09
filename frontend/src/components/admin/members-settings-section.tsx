@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { Users } from "lucide-react";
 
-import { listMembers, updateMemberRole, type MemberRole, type MemberRoleRecord } from "@/lib/api";
+import { deleteMember, listMembers, updateMemberRole, type MemberRole, type MemberRoleRecord } from "@/lib/api";
+
+const PRIMARY_ADMIN_EMAIL = "founders@invariant-ai.com";
 
 export function MembersSettingsSection() {
   const [members, setMembers] = useState<MemberRoleRecord[]>([]);
@@ -42,6 +44,20 @@ export function MembersSettingsSection() {
       await refreshMembers();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to update member");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeMember(targetEmail: string) {
+    if (!window.confirm(`Delete ${targetEmail}? This removes them from roles.json.`)) return;
+    setBusy(true);
+    setStatus("");
+    try {
+      await deleteMember(targetEmail);
+      await refreshMembers();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to delete member");
     } finally {
       setBusy(false);
     }
@@ -106,7 +122,7 @@ export function MembersSettingsSection() {
         </div>
         <div className="divide-y divide-zinc-100 bg-white">
           {members.map((member) => (
-            <div key={member.email} className="grid items-center gap-3 px-4 py-3 md:grid-cols-[1fr_180px_auto]">
+            <div key={member.email} className="grid items-center gap-3 px-4 py-3 md:grid-cols-[1fr_180px_auto_auto]">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-zinc-900">{member.email}</p>
                 <p className="text-xs text-zinc-400">
@@ -115,7 +131,7 @@ export function MembersSettingsSection() {
               </div>
               <select
                 value={member.role}
-                disabled={busy || member.email === "anshsarkar18@gmail.com"}
+                disabled={busy || member.email === PRIMARY_ADMIN_EMAIL}
                 onChange={(event) => void saveMember(member.email, event.target.value as MemberRole)}
                 className="rounded-xl border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400 disabled:bg-zinc-50 disabled:text-zinc-400"
               >
@@ -128,6 +144,14 @@ export function MembersSettingsSection() {
               <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
                 {member.allowed ? "Allowed" : "Disabled"}
               </span>
+              <button
+                type="button"
+                disabled={busy || member.email === PRIMARY_ADMIN_EMAIL}
+                onClick={() => void removeMember(member.email)}
+                className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-40"
+              >
+                Delete
+              </button>
             </div>
           ))}
           {members.length === 0 && (

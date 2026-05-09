@@ -69,6 +69,7 @@ async def test_invariant_get_and_patch(client: AsyncClient):
                         "end": "2026-06-10",
                         "file_paths": ["docs/a.pdf"],
                         "links": ["https://example.com"],
+                        "assignee_email": "founders@invariant-ai.com",
                     }
                 ],
             }
@@ -85,6 +86,7 @@ async def test_invariant_get_and_patch(client: AsyncClient):
     assert data["phases"][0]["name"] == "Discovery"
     assert data["phases"][0]["tasks"][0]["title"] == "Kickoff"
     assert data["phases"][0]["tasks"][0]["file_paths"] == ["docs/a.pdf"]
+    assert data["phases"][0]["tasks"][0]["assignee_email"] == "founders@invariant-ai.com"
     assert data.get("updated_at")
 
     again = await client.get("/api/workspaces/ws-cr2/compliance-roadmap", headers=_headers("inv-cr"))

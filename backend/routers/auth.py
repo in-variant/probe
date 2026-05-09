@@ -14,6 +14,7 @@ Endpoints:
 import logging
 import os
 import secrets
+import time
 from typing import Any
 
 os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
@@ -31,9 +32,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-ADMIN_EMAIL = "anshsarkar18@gmail.com"
+ADMIN_EMAIL = "founders@invariant-ai.com"
 ROLES_PATH = "auth/roles.json"
 VALID_ROLES = {"ADMIN", "CLIENT", "INVARIANT"}
+ROLES_CACHE_TTL_SEC = float(os.getenv("ROLES_CACHE_TTL_SEC", "5"))
 
 INVARIANT_EMAIL_DOMAIN = "invariant-ai.com"
 
@@ -59,6 +61,8 @@ LOGIN_SCOPES = [
 ]
 
 AUTH_SESSION_STORE: dict[str, dict[str, Any]] = {}
+_roles_cache_data: dict[str, Any] | None = None
+_roles_cache_ts: float = 0.0
 
 CALLBACK_PATH = "/gdrive/callback"
 
@@ -119,6 +123,10 @@ class MemberRoleUpdate(BaseModel):
     role: str
 
 
+class MemberDelete(BaseModel):
+    email: str
+
+
 def _default_roles() -> dict[str, Any]:
     return {
         "members": {
@@ -133,8 +141,12 @@ def _default_roles() -> dict[str, Any]:
     }
 
 
-def _read_roles() -> dict[str, Any]:
+def _read_roles(*, force_refresh: bool = False) -> dict[str, Any]:
     from storage import read_json_blob, write_json_blob, now_iso
+
+    global _roles_cache_data, _roles_cache_ts
+    if not force_refresh and _roles_cache_data is not None and time.monotonic() - _roles_cache_ts < ROLES_CACHE_TTL_SEC:
+        return _roles_cache_data
 
     existing_data = read_json_blob(ROLES_PATH)
     data = existing_data or _default_roles()
@@ -176,14 +188,19 @@ def _read_roles() -> dict[str, Any]:
     if changed:
         data["updated_at"] = ts
         write_json_blob(ROLES_PATH, data)
+    _roles_cache_data = data
+    _roles_cache_ts = time.monotonic()
     return data
 
 
 def _write_roles(data: dict[str, Any]) -> None:
     from storage import write_json_blob, now_iso
 
+    global _roles_cache_data, _roles_cache_ts
     data["updated_at"] = now_iso()
     write_json_blob(ROLES_PATH, data)
+    _roles_cache_data = data
+    _roles_cache_ts = time.monotonic()
 
 
 def _member_for_email(email: str) -> dict[str, Any] | None:
@@ -328,13 +345,26 @@ async def get_me(request: Request):
 @router.get("/members")
 async def list_members(request: Request):
     _require_admin(request)
-    members = _read_roles().get("members", {})
+    members = _read_roles(force_refresh=True).get("members", {})
     return {
         "members": sorted(
             members.values(),
             key=lambda item: str(item.get("email", "")),
         ),
         "roles": sorted(VALID_ROLES),
+    }
+
+
+@router.get("/members/assignable")
+async def list_assignable_members(request: Request):
+    get_current_user(request)
+    members = _read_roles(force_refresh=True).get("members", {})
+    assignable = [
+        member for member in members.values()
+        if isinstance(member, dict) and bool(member.get("allowed", True))
+    ]
+    return {
+        "members": sorted(assignable, key=lambda item: str(item.get("email", ""))),
     }
 
 
@@ -368,6 +398,28 @@ async def update_member_role(body: MemberRoleUpdate, request: Request):
         if session.get("email") == email:
             session["role"] = members[email]["role"]
     return members[email]
+
+
+@router.delete("/members")
+async def delete_member(body: MemberDelete, request: Request):
+    _require_admin(request)
+
+    email = body.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(422, "A valid email is required")
+    if email == ADMIN_EMAIL:
+        raise HTTPException(422, "Cannot remove primary admin account")
+    data = _read_roles()
+    members = data.setdefault("members", {})
+    existing = members.get(email)
+    if not isinstance(existing, dict):
+        raise HTTPException(404, "Member not found")
+    members.pop(email, None)
+    _write_roles(data)
+    for token, session in list(AUTH_SESSION_STORE.items()):
+        if str(session.get("email", "")).lower() == email:
+            AUTH_SESSION_STORE.pop(token, None)
+    return {"ok": True, "email": email}
 
 
 @router.post("/logout")

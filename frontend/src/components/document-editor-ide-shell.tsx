@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useSearchParams } from "next/navigation";
 import { DocumentMarkdownLiveEditor } from "@/components/document-editor/document-markdown-live-editor";
 import { cn } from "@/lib/utils";
 import {
@@ -437,6 +438,10 @@ function FileTreeNode({
 }
 
 export function DocumentEditorIdeShell() {
+  const searchParams = useSearchParams();
+  const requestedWorkspaceId = searchParams.get("workspace") ?? "";
+  const requestedFilePath = searchParams.get("file") ?? "";
+  const openedFromQueryRef = useRef(false);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState("");
   const [tree, setTree] = useState<TreeNode[]>([]);
@@ -688,9 +693,10 @@ export function DocumentEditorIdeShell() {
         const items = await listWorkspaces();
         if (cancelled) return;
         setWorkspaces(items);
-        if (items[0]) {
-          setWorkspaceId(items[0].id);
-          await loadTree(items[0].id);
+        const preferredWorkspace = items.find((w) => w.id === requestedWorkspaceId)?.id ?? items[0]?.id ?? "";
+        if (preferredWorkspace) {
+          setWorkspaceId(preferredWorkspace);
+          await loadTree(preferredWorkspace);
         } else {
           setLoadingTree(false);
         }
@@ -704,7 +710,7 @@ export function DocumentEditorIdeShell() {
     return () => {
       cancelled = true;
     };
-  }, [loadTree]);
+  }, [loadTree, requestedWorkspaceId]);
 
   const handleSelectFile = useCallback(
     async (path: string) => {
@@ -738,6 +744,20 @@ export function DocumentEditorIdeShell() {
     },
     [loadFileComments, workspaceId],
   );
+
+  useEffect(() => {
+    if (openedFromQueryRef.current) return;
+    if (!requestedFilePath || !workspaceId) return;
+    if (requestedWorkspaceId && requestedWorkspaceId !== workspaceId) return;
+    const exists = (nodes: TreeNode[]): boolean =>
+      nodes.some((node) => {
+        if (node.type === "file" && node.path === requestedFilePath) return true;
+        return node.children ? exists(node.children) : false;
+      });
+    if (!exists(tree)) return;
+    openedFromQueryRef.current = true;
+    void handleSelectFile(requestedFilePath);
+  }, [handleSelectFile, requestedFilePath, requestedWorkspaceId, tree, workspaceId]);
 
   const saveSelectedFile = useCallback(async (contentOverride?: string) => {
     if (!workspaceId || !selectedFile) return;

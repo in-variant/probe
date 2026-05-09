@@ -118,3 +118,31 @@ async def test_wipe_admin_clears_collections(client: AsyncClient):
 
 def test_wipe_phrase_matches_frontend_contract():
     assert admin_rag.WIPE_CONFIRMATION_PHRASE == "DELETE CHROMA"
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_requires_admin(client: AsyncClient):
+    AUTH_SESSION_STORE["viewer"] = {
+        "email": "viewer@example.com",
+        "name": "V",
+        "picture": "",
+        "role": "CLIENT",
+    }
+    resp = await client.get("/api/admin/rag/diagnostics?workspace_id=w1", headers=_headers("viewer"))
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_payload_shape(client: AsyncClient):
+    AUTH_SESSION_STORE["adm4"] = {
+        "email": ADMIN_EMAIL,
+        "name": "A",
+        "picture": "",
+        "role": "ADMIN",
+    }
+    resp = await client.get("/api/admin/rag/diagnostics?workspace_id=w1", headers=_headers("adm4"))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "knowledge_base" in body
+    assert "collections" in body
+    assert "storage" in body
