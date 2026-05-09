@@ -1,5 +1,6 @@
 import logging
 import os
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from starlette.responses import JSONResponse
 
 from routers import workspaces, documents, search, gdrive, auth
 from sync import sync_engine
+from rag.jobs import bootstrap_all_workspaces, start_index_queue, stop_index_queue
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -25,8 +27,14 @@ async def lifespan(app: FastAPI):
     sync_engine.hydrate()
     sync_engine.start()
     logger.info("Sync engine started.")
+    await start_index_queue()
+    bootstrap_task = asyncio.create_task(bootstrap_all_workspaces(), name="rag-bootstrap")
+    logger.info("RAG indexing bootstrap scheduled.")
     yield
     logger.info("Shutting down: flushing dirty queue to GCS...")
+    bootstrap_task.cancel()
+    await asyncio.gather(bootstrap_task, return_exceptions=True)
+    await stop_index_queue()
     sync_engine.stop()
     logger.info("Shutdown complete.")
 

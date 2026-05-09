@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 import local_cache
+from rag.jobs import enqueue_delete, enqueue_index
 from storage import (
     get_bucket,
     workspace_prefix,
@@ -203,7 +204,16 @@ async def rename_folder(
     if not local_cache.exists(old_prefix):
         raise HTTPException(404, "Folder not found")
 
+    existing_files = local_cache.list_all_files(old_prefix)
     rename_prefix(old_prefix + "/", new_prefix + "/")
+    ws_prefix_for_rename = workspace_prefix(workspace_id)
+    new_rel_prefix = new_prefix[len(ws_prefix_for_rename):].strip("/")
+    for old_file in existing_files:
+        rel_old = old_file[len(ws_prefix_for_rename):].lstrip("/")
+        suffix = old_file[len(old_prefix):].lstrip("/")
+        if rel_old and not PurePosixPath(rel_old).name.startswith("."):
+            enqueue_delete(workspace_id, rel_old)
+            enqueue_index(workspace_id, f"{new_rel_prefix}/{suffix}".strip("/"))
 
     _update_workspace_counts(workspace_id)
     return {"renamed": True, "new_path": f"{parent.rstrip('/')}/{body.new_name}".lstrip("/")}
@@ -223,6 +233,10 @@ async def delete_folder(
     if not local_cache.exists(local_prefix):
         raise HTTPException(404, "Folder not found")
 
+    for existing_file in local_cache.list_all_files(local_prefix):
+        rel_existing = existing_file[len(workspace_prefix(workspace_id)):].lstrip("/")
+        if rel_existing and not PurePosixPath(rel_existing).name.startswith("."):
+            enqueue_delete(workspace_id, rel_existing)
     delete_prefix(local_prefix)
 
     _update_workspace_counts(workspace_id)
@@ -260,11 +274,13 @@ async def upload_files(workspace_id: str, request: Request):
             "updated": now_iso(),
         }
         write_file_blob(file_path, content, metadata)
+        rel_path = f"{path.rstrip('/')}/{f.filename}".lstrip("/")
+        enqueue_index(workspace_id, rel_path)
 
         uploaded.append({
             "name": f.filename,
             "type": "file",
-            "path": f"{path.rstrip('/')}/{f.filename}".lstrip("/"),
+            "path": rel_path,
             "size": len(content),
             "content_type": content_type,
             "status": status,
@@ -326,6 +342,7 @@ async def import_zip(
             "source": "zip_upload",
         }
         write_file_blob(destination, file_bytes, metadata)
+        enqueue_index(workspace_id, destination[len(workspace_prefix(workspace_id)):].lstrip("/"))
         imported_count += 1
 
     await file.close()
@@ -429,6 +446,8 @@ async def update_file(
         parent = str(PurePosixPath(path).parent)
         new_path = _file_local_path(workspace_id, parent, body.name)
         rename_blob(file_path, new_path)
+        enqueue_delete(workspace_id, path)
+        enqueue_index(workspace_id, f"{parent.rstrip('/')}/{body.name}".lstrip("/"))
         return {"renamed": True, "new_path": f"{parent.rstrip('/')}/{body.name}".lstrip("/")}
 
     return {"updated": True}
@@ -450,6 +469,7 @@ async def delete_file(
         raise HTTPException(404, "File not found")
 
     delete_blob(file_path)
+    enqueue_delete(workspace_id, path)
     _update_workspace_counts(workspace_id)
     return {"deleted": path}
 
@@ -474,6 +494,7 @@ async def bulk_delete_files(
         file_path = f"{ws_prefix}{p.lstrip('/')}"
         if blob_exists(file_path):
             delete_blob(file_path)
+            enqueue_delete(workspace_id, p)
             deleted.append(p)
 
     _update_workspace_counts(workspace_id)
@@ -486,6 +507,38 @@ async def bulk_delete_files(
 class FileMove(BaseModel):
     source_paths: list[str]
     destination_folder: str
+
+
+class TextFileWrite(BaseModel):
+    path: str = Field(..., min_length=1, max_length=500)
+    content: str = Field(default="")
+    content_type: str = Field(default="text/markdown")
+
+
+@router.put("/workspaces/{workspace_id}/files/text")
+async def write_text_file(workspace_id: str, body: TextFileWrite):
+    _ensure_workspace(workspace_id)
+    clean_path = body.path.strip().lstrip("/")
+    if not clean_path or clean_path.endswith("/"):
+        raise HTTPException(status_code=422, detail="A file path is required")
+
+    file_path = f"{workspace_prefix(workspace_id)}{clean_path}"
+    encoded = body.content.encode("utf-8")
+    write_file_blob(
+        file_path,
+        encoded,
+        {
+            "status": "generated",
+            "original_name": PurePosixPath(clean_path).name,
+            "content_type": body.content_type or "text/markdown",
+            "size": len(encoded),
+            "time_created": now_iso(),
+            "updated": now_iso(),
+        },
+    )
+    enqueue_index(workspace_id, clean_path)
+    _update_workspace_counts(workspace_id)
+    return {"path": clean_path, "size": len(encoded), "content_type": body.content_type}
 
 
 @router.post("/workspaces/{workspace_id}/files/move")
@@ -504,7 +557,10 @@ async def move_files(
         filename = PurePosixPath(src).name
         dst_path = _file_local_path(workspace_id, body.destination_folder, filename)
         rename_blob(src_path, dst_path)
-        moved.append({"from": src, "to": f"{body.destination_folder.rstrip('/')}/{filename}".lstrip("/")})
+        dst_rel = f"{body.destination_folder.rstrip('/')}/{filename}".lstrip("/")
+        enqueue_delete(workspace_id, src)
+        enqueue_index(workspace_id, dst_rel)
+        moved.append({"from": src, "to": dst_rel})
 
     _update_workspace_counts(workspace_id)
     return {"moved": moved}

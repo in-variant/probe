@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 import local_cache
+from rag.jobs import enqueue_index
 from storage import (
     workspace_prefix,
     workspace_meta_path,
@@ -178,6 +179,7 @@ async def import_from_drive(workspace_id: str, body: DriveImportRequest, request
                 "drive_file_id": df["id"],
             }
             write_file_blob(file_path, content, file_metadata)
+            enqueue_index(workspace_id, filename)
             imported.append({"name": df["name"], "path": filename, "size": len(content)})
         except Exception as exc:
             logger.warning("Failed to import %s: %s", df.get("name"), exc)

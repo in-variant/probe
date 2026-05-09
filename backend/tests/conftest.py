@@ -57,6 +57,16 @@ def _isolate_cache(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_rag_store(tmp_path):
+    """Redirect Chroma persistence to a per-test temp directory."""
+    from rag.chroma_store import ChromaStore, set_store_for_tests
+
+    set_store_for_tests(ChromaStore(tmp_path / "chroma"))
+    yield
+    set_store_for_tests(None)
+
+
+@pytest.fixture(autouse=True)
 def _stub_sync(monkeypatch):
     """Replace the global sync_engine with a no-op stub."""
     import sync

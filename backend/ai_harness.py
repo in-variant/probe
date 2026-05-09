@@ -25,6 +25,8 @@ load_dotenv(Path(__file__).parent / ".env")
 
 import local_cache
 from gcs_client import get_client
+from rag.retriever import citations_text, retrieve
+from rag.types import RagHit
 from storage import workspace_prefix, read_json_blob, workspace_meta_path
 
 logger = logging.getLogger(__name__)
@@ -119,22 +121,84 @@ Rules:
 - Keep the summary under 150 words.
 - Do not repeat the query back. Just answer it."""
 
+RESEARCH_SUMMARY_SYSTEM_PROMPT = """You are a research-grade document analysis assistant. You will be given retrieved excerpts from multiple documents and a user query.
+
+Produce a detailed, well-structured markdown answer based only on the provided excerpts.
+
+Format:
+- Use clear headings and subheadings.
+- Separate sections with concise paragraphs.
+- Include concrete values, constraints, assumptions, and implications when present.
+- Mention gaps or uncertainties if the excerpts do not fully answer something.
+- Do not invent facts.
+- Do not use em dashes.
+- Do not repeat the query back.
+
+Target depth: 800-1400 words when the evidence supports it."""
+
 MAX_CONTENT_BYTES_PER_FILE = 30_000
 MAX_FILES_FOR_SUMMARY = 5
+EXTRACTED_TEXT_DIR = ".extracted_text"
+
+
+def _is_research_query(query: str) -> bool:
+    return "agent mode: research" in query.lower()
 
 
 def _read_file_text(workspace_id: str, doc_path: str) -> str | None:
     """Read a file from the local cache and return its text content, or None."""
     prefix = workspace_prefix(workspace_id).rstrip("/")
-    rel_path = f"{prefix}{doc_path}"
+    clean_path = doc_path.lstrip("/")
+    sidecar_path = f"{prefix}/{EXTRACTED_TEXT_DIR}/{clean_path}.txt"
+    sidecar = local_cache.read_file(sidecar_path)
+    if sidecar:
+        try:
+            return sidecar[:MAX_CONTENT_BYTES_PER_FILE].decode("utf-8", errors="replace")
+        except Exception:
+            return None
+    rel_path = f"{prefix}/{clean_path}"
     raw = local_cache.read_file(rel_path)
     if raw is None:
         return None
     raw = raw[:MAX_CONTENT_BYTES_PER_FILE]
     try:
-        return raw.decode("utf-8", errors="replace")
+        decoded = raw.decode("utf-8", errors="replace")
+        if decoded.lstrip().startswith("%PDF-"):
+            return None
+        return decoded
     except Exception:
         return None
+
+
+def _generate_summary_from_hits(query: str, hits: list[RagHit]) -> str:
+    if not hits:
+        return ""
+    research = _is_research_query(query)
+    max_hits = 12 if research else MAX_FILES_FOR_SUMMARY
+    chars_per_hit = 3200 if research else 2200
+    file_sections = [
+        f"--- {hit.path.lstrip('/')} chunk {hit.chunk_index} ---\n{hit.text[:chars_per_hit]}"
+        for hit in hits[:max_hits]
+        if hit.text.strip()
+    ]
+    if not file_sections:
+        return ""
+    user_msg = f"Query: {query}\n\nRetrieved document excerpts:\n{chr(10).join(file_sections)}"
+    try:
+        client = _get_openai_client()
+        completion = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": RESEARCH_SUMMARY_SYSTEM_PROMPT if research else SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.1,
+            max_tokens=1600 if research else 300,
+        )
+        return (completion.choices[0].message.content or "").strip()
+    except Exception:
+        logger.exception("Summary generation failed")
+        return ""
 
 
 def _generate_summary(query: str, results: list[dict[str, Any]], workspace_id: str) -> str:
@@ -233,12 +297,60 @@ def search_documents(workspace_id: str, query: str, session_id: str) -> dict[str
         _log_interaction(interaction_id, session_id, timestamp, request_payload, response_payload)
         return {"interaction_id": interaction_id, **response_payload}
 
+    research = _is_research_query(query)
+    try:
+        hits = retrieve(workspace_id, query, top_k=16 if research else 8)
+        if research:
+            expanded_hits: dict[str, RagHit] = {hit.chunk_id: hit for hit in hits}
+            for suffix in (
+                "requirements constraints assumptions",
+                "technical parameters values frequencies operations",
+                "risks gaps recommendations implications",
+            ):
+                for hit in retrieve(workspace_id, f"{query}\n{suffix}", top_k=8):
+                    expanded_hits.setdefault(hit.chunk_id, hit)
+            hits = sorted(expanded_hits.values(), key=lambda item: item.score, reverse=True)[:24]
+    except Exception:
+        logger.exception("[%s] Chroma retrieval failed", interaction_id[:8])
+        hits = []
+
+    if hits:
+        by_path: dict[str, dict[str, Any]] = {}
+        for hit in hits:
+            clean_path = hit.path.lstrip("/")
+            existing = by_path.get(clean_path)
+            if existing is None or hit.score > existing["score"]:
+                matched_doc = next((d for d in documents if d["path"].lstrip("/") == clean_path), {})
+                by_path[clean_path] = {
+                    "path": f"/{clean_path}",
+                    "name": matched_doc.get("name") or Path(clean_path).name,
+                    "relevance": "Retrieved from indexed document content.",
+                    "score": round(hit.score, 4),
+                    "size": matched_doc.get("size"),
+                    "content_type": matched_doc.get("content_type"),
+                    "status": matched_doc.get("status"),
+                }
+        results = sorted(by_path.values(), key=lambda item: item["score"], reverse=True)
+        summary = _generate_summary_from_hits(query, hits)
+        source_block = citations_text(hits)
+        if source_block and summary:
+            summary = f"{summary}{source_block}"
+        elif source_block:
+            summary = source_block.strip()
+        response_payload = {
+            "results": results,
+            "message": f"Found {len(results)} relevant document(s).",
+            "summary": summary,
+        }
+        _log_interaction(interaction_id, session_id, timestamp, request_payload, response_payload)
+        return {"interaction_id": interaction_id, **response_payload}
+
     user_prompt = _build_user_prompt(query, documents)
     error_message = ""
 
     try:
         client = _get_openai_client()
-        logger.info(f"[{interaction_id[:8]}] Calling OpenAI with {len(documents)} docs, query: {query!r}")
+        logger.info("[%s] Calling OpenAI document selector with docs=%s", interaction_id[:8], len(documents))
 
         completion = client.chat.completions.create(
             model=OPENAI_MODEL,
@@ -250,7 +362,7 @@ def search_documents(workspace_id: str, query: str, session_id: str) -> dict[str
         )
 
         raw_text = (completion.choices[0].message.content or "").strip()
-        logger.info(f"[{interaction_id[:8]}] Raw response ({len(raw_text)} chars): {raw_text[:200]!r}")
+        logger.info("[%s] OpenAI selector response chars=%s", interaction_id[:8], len(raw_text))
 
         raw_text = _strip_markdown_fences(raw_text)
         results = json.loads(raw_text)

@@ -1,5 +1,6 @@
 import io
 import pytest
+from unittest.mock import patch
 from httpx import AsyncClient
 
 import local_cache
@@ -173,16 +174,18 @@ class TestUploadFiles:
     @pytest.mark.asyncio
     async def test_single_upload(self, client: AsyncClient):
         _seed_workspace("ws-up")
-        resp = await client.post(
-            "/api/workspaces/ws-up/files",
-            files={"files": ("hello.txt", b"hello world", "text/plain")},
-            data={"path": "/", "status": "uploaded"},
-        )
+        with patch("routers.documents.enqueue_index") as enqueue:
+            resp = await client.post(
+                "/api/workspaces/ws-up/files",
+                files={"files": ("hello.txt", b"hello world", "text/plain")},
+                data={"path": "/", "status": "uploaded"},
+            )
         assert resp.status_code == 201
         uploaded = resp.json()["uploaded"]
         assert len(uploaded) == 1
         assert uploaded[0]["name"] == "hello.txt"
         assert uploaded[0]["size"] == 11
+        enqueue.assert_called_once_with("ws-up", "hello.txt")
 
     @pytest.mark.asyncio
     async def test_multiple_upload(self, client: AsyncClient):

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-import { FolderOpen, Home, LogOut, ChevronDown, User } from "lucide-react";
+import { FolderOpen, Home, LogOut, ChevronDown, User, FilePenLine } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { useAuth } from "@/lib/auth";
 const NAV_ITEMS = [
   { href: "/", icon: Home, label: "Home" },
   { href: "/workspaces", icon: FolderOpen, label: "Workspaces" },
+  { href: "/document-editor", icon: FilePenLine, label: "Document Editor" },
 ] as const;
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {

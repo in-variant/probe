@@ -248,6 +248,19 @@ export async function moveFiles(
   });
 }
 
+export async function writeTextFile(
+  workspaceId: string,
+  path: string,
+  content: string,
+  contentType: string = "text/markdown"
+): Promise<{ path: string; size: number; content_type: string }> {
+  return request(`/api/workspaces/${workspaceId}/files/text`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, content, content_type: contentType }),
+  });
+}
+
 export async function getDownloadUrl(
   workspaceId: string,
   path: string
